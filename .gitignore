@@ -1,0 +1,23 @@
+# Secrets (never commit these)
+.env
+service-account.json
+*.json.key
+credentials*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Flask / logs
+instance/
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

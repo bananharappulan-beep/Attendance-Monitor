@@ -1,0 +1,349 @@
+// ---------- CONFIG ----------
+// Leave blank when the page is served by the Flask app itself.
+// If you host the front end elsewhere, set this to your Flask URL, e.g. 'https://attendance.example.com'.
+const API_URL = '';
+
+const LATE_AFTER = 9 * 60 + 10;   // 09:10
+const EARLY_BEFORE = 17 * 60;     // 17:00
+const PRESENT_MIN = 7 * 60;       // >= 7h  -> P
+const HALF_MIN = 3 * 60 + 30;   // >= 3h30 (rounds to 4h) and < 7h -> H ; below 3h30 (or 0) -> A
+
+// ---------- Helpers ----------
+const $ = id => document.getElementById(id);
+const p2 = n => String(n).padStart(2, '0');
+const fmtHM = m => m == null ? '' : p2(Math.floor(m / 60)) + ':' + p2(m % 60);   // durations (late, early, worked)
+const fmt12 = m => {                                                              // clock times (punch in / out)
+  if (m == null) return '';
+  const h = Math.floor(m / 60) % 24;
+  return p2(h % 12 || 12) + ':' + p2(m % 60) + ' ' + (h < 12 ? 'AM' : 'PM');
+};
+const dmy = iso => iso.split('-').reverse().join('-');
+const esc = s => String(s).replace(/[&<>"']/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function toMin(s) {
+  const m = String(s || '').match(/(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  let h = +m[1];
+  if (/pm/i.test(s) && h < 12) h += 12;
+  if (/am/i.test(s) && h === 12) h = 0;
+  return h * 60 + +m[2];
+}
+
+function status(min) { return min >= PRESENT_MIN ? 'P' : min >= HALF_MIN ? 'H' : 'A'; }
+
+// Punch-out without AM/PM (e.g. "04:55") that is earlier than punch-in (or before 08:00 with no
+// punch-in) can only be an afternoon time -> treat as PM (04:55 -> 16:55).
+function fixOut(inM, outM, raw) {
+  if (outM == null || /[ap]m/i.test(String(raw))) return outM;
+  if (outM < 12 * 60 && (inM != null ? outM < inM : outM < 8 * 60)) return outM + 12 * 60;
+  return outM;
+}
+
+function analyse(r) {
+  if (!r) return { inM: null, outM: null, work: 0, st: 'A' };
+  const inM = toMin(r.inT), outM = fixOut(inM, toMin(r.outT), r.outT);
+  const work = inM != null && outM != null && outM > inM ? outM - inM : 0; // PUNCH OUT - PUNCH IN
+  return { inM, outM, work, st: status(work) };
+}
+
+const pill = s => `<span class="pill ${s}">${s}</span>`;
+
+// ---------- API ----------
+async function api(path, params) {
+  const qs = params ? '?' + new URLSearchParams(params) : '';
+  const res = await fetch(API_URL + path + qs);
+  const data = await res.json();
+  if (data && data.error) throw new Error(data.error);
+  return data;
+}
+
+// ---------- State ----------
+let rows = [];              // rows of the selected branch
+let byKey = new Map();      // "date|name" -> row
+let names = [];
+
+function indexRows() {
+  byKey = new Map();
+  rows.forEach(r => byKey.set(r.d + '|' + r.name, r));
+  names = [...new Set(rows.map(r => r.name))].sort((a, b) => a.localeCompare(b));
+}
+
+function setMsg(text, isError = false) {
+  const el = $('msg');
+  el.textContent = text;
+  el.classList.toggle('error', isError);
+}
+
+// ---------- Daily ----------
+function renderDaily() {
+  const d = $('date').value;
+  const heads = ['SL NO', 'EMP NAME', 'PUNCH IN TIME', 'LATE TIME', 'PUNCH OUT',
+                 'EARLY LEAVING TIME', 'TOTAL WORKING HOURS', 'STATUS'];
+  $('dailyHead').innerHTML = heads.map(h => `<th>${h}</th>`).join('');
+
+  const cnt = { P: 0, H: 0, A: 0 };
+  $('dailyBody').innerHTML = names.map((n, i) => {
+    const a = analyse(byKey.get(d + '|' + n));
+    cnt[a.st]++;
+    const late = a.inM != null && a.inM > LATE_AFTER ? fmtHM(a.inM - LATE_AFTER) : '';
+    const early = a.outM != null && a.outM < EARLY_BEFORE ? fmtHM(EARLY_BEFORE - a.outM) : '';
+    const out = a.outM != null
+      ? fmt12(a.outM)
+      : (a.inM != null ? '<span class="no-out">No out punch</span>' : '');
+    return `<tr>
+      <td>${i + 1}</td><td class="name">${esc(n)}</td>
+      <td>${fmt12(a.inM)}</td>
+      <td class="late">${late}</td>
+      <td>${out}</td>
+      <td class="early">${early}</td>
+      <td>${fmtHM(a.work)}</td>
+      <td>${pill(a.st)}</td></tr>`;
+  }).join('') || `<tr><td colspan="8" class="empty">No data</td></tr>`;
+
+  $('cards').innerHTML = [['P', 'Present'], ['H', 'Half-day'], ['A', 'Absent']].map(([k, l]) =>
+    `<div class="card"><div class="label">${l}</div><div class="value">${cnt[k]}</div></div>`).join('');
+}
+
+// ---------- Matrix ----------
+function renderMatrix() {
+  const f = $('from').value, t = $('to').value;
+  if (!f || !t || f > t) { $('matrixTable').innerHTML = ''; return; }
+
+  const days = [];
+  for (let d = new Date(f + 'T00:00:00'); d <= new Date(t + 'T00:00:00') && days.length < 92; d.setDate(d.getDate() + 1))
+    days.push(d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()));
+
+  const head = `<tr><th class="corner">EMP NAME</th>` +
+    days.map(x => `<th>${dmy(x)}</th>`).join('') + `</tr>`;
+
+  const hasData = new Set(rows.map(r => r.d)); // dates that have any records in this branch
+  const body = names.map(n => {
+    const cells = days.map(x => {
+      if (!hasData.has(x)) return `<td></td>`;                     // no data yet for that date -> blank
+      return `<td>${pill(analyse(byKey.get(x + '|' + n)).st)}</td>`; // missing employee -> A
+    }).join('');
+    return `<tr><td class="emp">${esc(n)}</td>${cells}</tr>`;
+  }).join('');
+
+  $('matrixTable').innerHTML = `<thead>${head}</thead><tbody>${body}</tbody>`;
+}
+
+function setMonthRange() {
+  const d = $('date').value;
+  if (!d) return;
+  const [y, m] = d.split('-').map(Number);
+  $('from').value = `${y}-${p2(m)}-01`;
+  $('to').value = `${y}-${p2(m)}-${p2(new Date(y, m, 0).getDate())}`;
+}
+
+// ---------- Load ----------
+async function loadBranch() {
+  setMsg('Loading…');
+  try {
+    rows = await api('/api/data', { branch: $('branch').value });
+    indexRows();
+    const latest = rows.map(r => r.d).sort().pop();
+    if (!$('date').value || !rows.some(r => r.d === $('date').value))
+      $('date').value = latest || new Date().toISOString().slice(0, 10);
+    setMonthRange();
+    renderDaily();
+    renderMatrix();
+    setMsg(`${rows.length} records · ${names.length} employees · updated ${new Date().toLocaleTimeString()}`);
+  } catch (e) { setMsg('Error: ' + (e.message || e), true); }
+}
+
+async function loadBranches() {
+  const b = await api('/api/branches');
+  $('branch').innerHTML = b.map(x => `<option>${esc(x)}</option>`).join('');
+  if (!b.length) setMsg('No branches found in the source sheet. Check SHEET_ID and that the tabs have data.');
+  else await loadBranch();
+}
+
+async function syncSheet() {
+  const btn = $('sync');
+  btn.disabled = true;
+  setMsg('Syncing from Google Sheet…');
+  try {
+    const r = await api('/api/sync');
+    const current = $('branch').value;
+    await loadBranches();
+    if (current && [...$('branch').options].some(o => o.value === current)) {
+      $('branch').value = current;
+      await loadBranch();
+    }
+    setMsg(`Synced ${r.rows} rows · matrix saved for ${r.branches} branch(es) in the output Google Sheet.`);
+  } catch (e) { setMsg('Sync error: ' + (e.message || e), true); }
+  btn.disabled = false;
+}
+
+// ---------- PDF export (Daily Report) ----------
+function dailyRowsFor(data, date) {
+  const map = new Map(data.map(r => [r.d + '|' + r.name, r]));
+  const emp = [...new Set(data.map(r => r.name))].sort((a, b) => a.localeCompare(b));
+  const cnt = { P: 0, H: 0, A: 0 };
+  const body = emp.map((n, i) => {
+    const a = analyse(map.get(date + '|' + n));
+    cnt[a.st]++;
+    return [
+      i + 1, n, fmt12(a.inM),
+      a.inM != null && a.inM > LATE_AFTER ? fmtHM(a.inM - LATE_AFTER) : '',
+      a.outM != null ? fmt12(a.outM) : (a.inM != null ? 'No out punch' : ''),
+      a.outM != null && a.outM < EARLY_BEFORE ? fmtHM(EARLY_BEFORE - a.outM) : '',
+      fmtHM(a.work), a.st
+    ];
+  });
+  return { body, cnt };
+}
+
+function makePdf(branch, data, date) {
+  const { jsPDF } = window.jspdf;
+  const { body, cnt } = dailyRowsFor(data, date);
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setFontSize(16);
+  doc.text(`${branch} - Daily Report`, 40, 40);
+  doc.setFontSize(10);
+  doc.setTextColor(100);
+  doc.text(`Date: ${dmy(date)}   |   Total: ${body.length}   Present: ${cnt.P}   Half-day: ${cnt.H}   Absent: ${cnt.A}`, 40, 58);
+  const colors = { P: [[220, 252, 231], [22, 101, 52]], H: [[254, 243, 199], [146, 64, 14]], A: [[254, 226, 226], [153, 27, 27]] };
+  doc.autoTable({
+    startY: 70,
+    head: [['SL NO', 'EMP NAME', 'PUNCH IN', 'LATE', 'PUNCH OUT', 'EARLY LEAVING', 'WORKING HRS', 'STATUS']],
+    body,
+    styles: { fontSize: 8.5, cellPadding: 4 },
+    headStyles: { fillColor: [15, 23, 42] },
+    didParseCell: h => {
+      if (h.section !== 'body') return;
+      if (h.column.index === 3 || h.column.index === 5) h.cell.styles.textColor = [220, 38, 38];
+      if (h.column.index === 7) {
+        const [bg, fg] = colors[h.cell.raw] || colors.A;
+        h.cell.styles.fillColor = bg; h.cell.styles.textColor = fg;
+        h.cell.styles.fontStyle = 'bold'; h.cell.styles.halign = 'center';
+      }
+    }
+  });
+  doc.save(String(branch).replace(/[\\/:*?"<>|]/g, '_').trim() + '.pdf');   // e.g. MANJERI.pdf
+}
+
+function loadScript(src) {
+  return new Promise((ok, fail) => {
+    const el = document.createElement('script');
+    el.src = src; el.onload = ok; el.onerror = () => fail(new Error('Could not load ' + src));
+    document.head.appendChild(el);
+  });
+}
+
+// jsPDF is normally loaded by index.html; if the page didn't include it, load it here.
+async function pdfReady() {
+  try {
+    if (!(window.jspdf && window.jspdf.jsPDF))
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    if (!(window.jspdf.jsPDF.API && window.jspdf.jsPDF.API.autoTable))
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
+    return true;
+  } catch (e) {
+    setMsg('PDF library could not be loaded (check internet / CDN access).', true);
+    return false;
+  }
+}
+
+async function exportBranchPdf() {
+  const date = $('date').value;
+  if (!(await pdfReady())) return;
+  if (!date || !rows.length) return setMsg('No data to export for this branch/date.', true);
+  makePdf($('branch').value, rows, date);
+  setMsg(`Exported ${$('branch').value}.pdf`);
+}
+
+async function exportAllPdf() {
+  const date = $('date').value;
+  if (!(await pdfReady())) return;
+  if (!date) return setMsg('Select a date first.', true);
+  const btn = $('exportAll');
+  btn.disabled = true;
+  try {
+    const branches = await api('/api/branches');
+    for (let i = 0; i < branches.length; i++) {
+      setMsg(`Preparing ${branches[i]}.pdf (${i + 1}/${branches.length})…`);
+      makePdf(branches[i], await api('/api/data', { branch: branches[i] }), date);
+      await new Promise(r => setTimeout(r, 500));   // small gap so the browser accepts every download
+    }
+    setMsg(`Downloaded ${branches.length} branch PDF(s) for ${dmy(date)}. If some are missing, allow multiple downloads in your browser.`);
+  } catch (e) { setMsg('Export error: ' + (e.message || e), true); }
+  btn.disabled = false;
+}
+
+// ---------- Tabs & events ----------
+// ---------- Overall summary (all branches, selected date) ----------
+async function loadSummary() {
+  const body = $('summaryBody');
+  body.innerHTML = `<tr><td colspan="6" class="empty">Loading…</td></tr>`;
+  try {
+    // Uses the same analyse() as the Daily Report, so the two views can never disagree.
+    const branches = await api('/api/branches');
+    const all = await Promise.all(branches.map(async b => ({ branch: b, data: await api('/api/data', { branch: b }) })));
+    const date = $('date').value || all.flatMap(x => x.data.map(r => r.d)).sort().pop() || '';
+    $('summaryHint').textContent = date ? `Attendance summary for ${dmy(date)} (all branches)` : '';
+    const s = {
+      rows: all.map(({ branch, data }) => {
+        const emp = [...new Set(data.map(r => r.name))];
+        const day = new Map(data.filter(r => r.d === date).map(r => [r.name, r]));
+        const cnt = { P: 0, H: 0, A: 0 };
+        emp.forEach(n => cnt[analyse(day.get(n)).st]++);   // no record that day -> Absent
+        return { branch, total: emp.length, present: cnt.P, absent: cnt.A, half: cnt.H };
+      })
+    };
+    const tot = { total: 0, present: 0, absent: 0, half: 0 };
+    let html = s.rows.map((r, i) => {
+      Object.keys(tot).forEach(k => tot[k] += r[k]);
+      return `<tr><td>${i + 1}</td><td class="name">${esc(r.branch)}</td>
+        <td>${r.total}</td><td>${r.present}</td><td>${r.absent}</td><td>${r.half}</td></tr>`;
+    }).join('');
+    if (s.rows.length)
+      html += `<tr class="total-row"><td></td><td>TOTAL</td>
+        <td>${tot.total}</td><td>${tot.present}</td><td>${tot.absent}</td><td>${tot.half}</td></tr>`;
+    body.innerHTML = html || `<tr><td colspan="6" class="empty">No data</td></tr>`;
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="6" class="empty">Error: ${esc(e.message || e)}</td></tr>`;
+  }
+}
+
+function showTab(t) {
+  ['daily', 'matrix', 'summary'].forEach(x => $(x).classList.toggle('hidden', x !== t));
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+  if (t === 'summary') loadSummary();
+}
+
+const on = (id, ev, fn) => { const el = $(id); if (el) el[ev] = fn; };   // never let a missing element break the page
+
+// If the HTML template is an older/cached copy without the export buttons, add them here.
+function ensureExportBar() {
+  if ($('exportPdf') || !$('daily')) return;
+  const icon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+  const bar = document.createElement('div');
+  bar.className = 'export-bar';
+  bar.innerHTML = `<button id="exportPdf" class="btn-export">${icon}Export to PDF</button>` +
+                  `<button id="exportAll" class="btn-export">${icon}Download All (PDF)</button>`;
+  $('daily').appendChild(bar);
+}
+ensureExportBar();
+
+document.querySelectorAll('.tab').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+const summaryOpen = () => $('summary') && !$('summary').classList.contains('hidden');
+on('branch', 'onchange', () => { $('date').value = ''; loadBranch(); });
+on('refresh', 'onclick', async () => { await loadBranch(); if (summaryOpen()) loadSummary(); });
+on('sync', 'onclick', syncSheet);
+on('exportPdf', 'onclick', exportBranchPdf);
+on('exportAll', 'onclick', exportAllPdf);
+on('date', 'onchange', () => { setMonthRange(); renderDaily(); renderMatrix(); if (summaryOpen()) loadSummary(); });
+on('from', 'onchange', renderMatrix);
+on('to', 'onchange', renderMatrix);
+
+// show any unexpected script error on screen instead of failing silently
+window.addEventListener('error', e => setMsg('Script error: ' + e.message, true));
+
+(async () => {
+  showTab('daily');
+  try { await loadBranches(); }
+  catch (e) { setMsg('Error: ' + (e.message || e), true); }
+})();

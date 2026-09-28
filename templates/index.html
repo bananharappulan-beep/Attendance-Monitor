@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attendance Monitor</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="container">
+
+  <header class="topbar">
+    <h1>Attendance Monitor</h1>
+    <div class="controls">
+      <label>Branch
+        <select id="branch"></select>
+      </label>
+      <label>Date
+        <input id="date" type="date">
+      </label>
+      <button id="refresh" class="btn">Refresh</button>
+      <button id="sync" class="btn btn-secondary" title="Re-read the source sheet and save the P/H/A matrix to the output Google Sheet">Sync Sheet</button>
+    </div>
+  </header>
+
+  <div id="msg" class="msg"></div>
+
+  <nav class="tabs">
+    <button data-tab="daily" class="tab">Daily Report</button>
+    <button data-tab="matrix" class="tab">Status Matrix</button>
+    <button data-tab="summary" class="tab">Overall Summary</button>
+  </nav>
+
+  <section id="daily">
+    <div id="cards" class="cards"></div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr id="dailyHead"></tr></thead>
+        <tbody id="dailyBody"></tbody>
+      </table>
+    </div>
+    <div class="export-bar">
+      <button id="exportPdf" class="btn-export" title="Download this branch's Daily Report as PDF"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export to PDF</button>
+      <button id="exportAll" class="btn-export" title="Download one PDF per branch (e.g. MANJERI.pdf)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download All (PDF)</button>
+    </div>
+  </section>
+
+  <section id="matrix" class="hidden">
+    <div class="matrix-controls">
+      <label>From <input id="from" type="date"></label>
+      <label>To <input id="to" type="date"></label>
+      <span class="hint">Defaults to the month of the selected date. Blank = no attendance records for that date yet.</span>
+    </div>
+    <div class="table-wrap matrix-wrap">
+      <table id="matrixTable" class="matrix-table"></table>
+    </div>
+  </section>
+
+  <section id="summary" class="hidden">
+    <div class="hint" id="summaryHint"></div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>SL NO</th><th>BRANCH</th><th>TOTAL EMPLOYEES</th>
+            <th>PRESENT</th><th>ABSENT</th><th>HALF DAY</th>
+          </tr>
+        </thead>
+        <tbody id="summaryBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

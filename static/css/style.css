@@ -1,0 +1,154 @@
+@import url('https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap');
+
+:root {
+  --font: 'Lora', Georgia, 'Times New Roman', serif;
+  --bg: #f8fafc;
+  --text: #1e293b;
+  --muted: #64748b;
+  --faint: #94a3b8;
+  --border: #e2e8f0;
+  --head: #f1f5f9;
+  --dark: #0f172a;
+  --red: #dc2626;
+  --green-bg: #dcfce7; --green-fg: #166534;
+  --amber-bg: #fef3c7; --amber-fg: #92400e;
+  --red-bg: #fee2e2;   --red-fg: #991b1b;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  line-height: 1.5;
+}
+
+/* form controls do not inherit the page font by default */
+button, select, input, textarea { font-family: inherit; }
+
+.container { max-width: 80rem; margin: 0 auto; padding: 1rem; }
+.container > * + * { margin-top: 1rem; }
+.hidden { display: none !important; }
+
+/* header */
+.topbar { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: .75rem; }
+.topbar h1 { margin: 0; font-size: 1.5rem; font-weight: 700; }
+.controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .75rem; }
+
+label { display: flex; flex-direction: column; font-size: .875rem; gap: .25rem; }
+select, input[type="date"] {
+  border: 1px solid var(--border);
+  border-radius: .375rem;
+  padding: .5rem .75rem;
+  background: #fff;
+  font: inherit;
+  color: inherit;
+}
+select { min-width: 180px; }
+
+.btn {
+  padding: .5rem 1rem;
+  border: 0;
+  border-radius: .375rem;
+  background: var(--dark);
+  color: #fff;
+  font-size: .875rem;
+  cursor: pointer;
+}
+.btn:hover { opacity: .9; }
+.btn:disabled { opacity: .5; cursor: wait; }
+.btn-secondary { background: #fff; color: var(--dark); border: 1px solid var(--border); }
+
+.msg { font-size: .875rem; color: var(--muted); min-height: 1.3em; }
+.msg.error { color: var(--red); }
+
+/* tabs */
+.tabs { display: flex; gap: .5rem; border-bottom: 1px solid var(--border); }
+.tab {
+  padding: .5rem 1rem;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  font-size: .875rem;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+}
+.tab.active { color: var(--text); border-bottom-color: var(--dark); }
+
+/* summary cards */
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; margin-bottom: .75rem; }
+.card { background: #fff; border: 1px solid var(--border); border-radius: .5rem; padding: .75rem; }
+.card .label { font-size: .75rem; color: var(--muted); }
+.card .value { font-size: 1.5rem; font-weight: 700; }
+
+/* tables */
+.table-wrap { overflow: auto; max-height: 70vh; background: #fff; border: 1px solid var(--border); border-radius: .5rem; }
+.data-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+.data-table th { position: sticky; top: 0; z-index: 5; background: var(--head); text-align: left; padding: .5rem .75rem; white-space: nowrap; box-shadow: 0 1px 0 var(--border); }
+.data-table td { padding: .5rem .75rem; border-top: 1px solid var(--border); }
+.data-table tbody tr:hover { background: var(--bg); }
+.data-table .name { font-weight: 500; }
+.late, .early { color: var(--red); }
+.no-out { color: var(--faint); font-style: italic; }
+.empty { padding: 1.5rem !important; text-align: center; color: var(--faint); }
+
+/* matrix */
+.matrix-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .75rem; margin-bottom: .75rem; }
+.hint { font-size: .75rem; color: var(--muted); }
+.matrix-wrap { overflow: auto; max-height: 70vh; }
+.matrix-table { border-collapse: collapse; font-size: .75rem; }
+.matrix-table th { position: sticky; top: 0; z-index: 10; background: var(--head); padding: .5rem; white-space: nowrap; }
+.matrix-table th.corner { left: 0; z-index: 20; text-align: left; padding: .5rem .75rem; }
+.matrix-table td { padding: .25rem; text-align: center; }
+.matrix-table tbody tr { border-top: 1px solid var(--border); }
+.matrix-table td.emp { position: sticky; left: 0; background: #fff; text-align: left; padding: .25rem .75rem; font-weight: 500; white-space: nowrap; }
+
+/* status pills */
+.pill { display: inline-block; width: 1.75rem; text-align: center; border-radius: .25rem; font-weight: 600; }
+.pill.P { background: var(--green-bg); color: var(--green-fg); }
+.pill.H { background: var(--amber-bg); color: var(--amber-fg); }
+.pill.A { background: var(--red-bg);   color: var(--red-fg); }
+
+@media (max-width: 600px) {
+  .cards { grid-template-columns: 1fr; }
+  select { min-width: 140px; }
+}
+/* overall summary */
+.total-row td { font-weight: 700; background: var(--head); }
+
+
+/* export buttons (bottom-right of the Daily Report) */
+.export-bar { position: sticky; bottom: 1rem; z-index: 30; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .75rem; margin-top: 1rem; pointer-events: none; }
+.export-bar .btn-export { pointer-events: auto; }
+.btn-export {
+  display: inline-flex; align-items: center; gap: .5rem;
+  padding: .75rem 1.5rem;
+  border: 0; border-radius: 999px;
+  background: #0f1f3d; color: #fff;
+  font: inherit; font-size: .95rem; font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .2);
+}
+.btn-export:hover { background: #1a2f57; }
+.btn-export:disabled { opacity: .5; cursor: wait; }
+
+/* ---- Overall Summary: bold headings + coloured counts ---- */
+#summary .data-table th { font-weight: 700; letter-spacing: .02em; }
+
+/* column headings (4 = Present, 5 = Absent, 6 = Half day) */
+#summary .data-table th:nth-child(4) { background: var(--green-bg); color: var(--green-fg); }
+#summary .data-table th:nth-child(5) { background: var(--red-bg);   color: var(--red-fg); }
+#summary .data-table th:nth-child(6) { background: var(--amber-bg); color: var(--amber-fg); }
+
+/* count values */
+#summary .data-table td:nth-child(4) { color: #16a34a; font-weight: 700; }   /* Present  - green  */
+#summary .data-table td:nth-child(5) { color: #dc2626; font-weight: 700; }   /* Absent   - red    */
+#summary .data-table td:nth-child(6) { color: #ca8a04; font-weight: 700; }   /* Half day - yellow */
+
+/* ---- Overall Summary alignment: everything centred except the branch names ---- */
+#summary .data-table th,
+#summary .data-table td { text-align: center; }
+#summary .data-table td:nth-child(2) { text-align: left; }   /* branch values (and TOTAL label) */
