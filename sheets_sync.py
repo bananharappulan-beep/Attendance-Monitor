@@ -10,11 +10,13 @@ The header holds EVERY day of the month. At 11:00 PM each day only that day's co
 filled in (archive_today). All other columns are kept exactly as they are.
 The manual "Sync Sheet" button back-fills every date found in the source sheet.
 """
+import json
 import logging
 import re
 import threading
 from calendar import monthrange
 from datetime import date, datetime, time
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from google.oauth2 import service_account
@@ -111,13 +113,27 @@ def status_for(row):
 
 
 # ---------- Google API ----------
+def _credentials():
+    raw = Config.GOOGLE_CREDENTIALS.strip()
+    if not raw:
+        raise RuntimeError("GOOGLE_CREDENTIALS is empty. Set it to a local JSON path or the raw JSON content.")
+
+    if raw.startswith("{"):
+        info = json.loads(raw)
+        return service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+
+    path = Path(raw)
+    if not path.is_absolute():
+        path = (Path(__file__).resolve().parent / path).resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Google service account file not found: {path}")
+    return service_account.Credentials.from_service_account_file(str(path), scopes=SCOPES)
+
+
 def _sheets():
     global _service
     if _service is None:
-        creds = service_account.Credentials.from_service_account_file(
-            Config.GOOGLE_CREDENTIALS, scopes=SCOPES
-        )
-        _service = build("sheets", "v4", credentials=creds, cache_discovery=False)
+        _service = build("sheets", "v4", credentials=_credentials(), cache_discovery=False)
     return _service
 
 
