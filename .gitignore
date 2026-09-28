@@ -19,4 +19,4 @@ instance/
 .vscode/
 .idea/
 .DS_Store
-Thumbs.db
+Thumbs.dbservice-account.json
