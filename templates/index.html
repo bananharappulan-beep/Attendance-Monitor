@@ -25,12 +25,16 @@
 
   <div id="msg" class="msg"></div>
 
-  <nav class="tabs">
-    <button data-tab="daily" class="tab">Daily Report</button>
-    <button data-tab="matrix" class="tab">Status Matrix</button>
-    <button data-tab="summary" class="tab">Overall Summary</button>
-  </nav>
+  <div class="app-layout">
+    <aside class="sidebar">
+      <nav class="tabs" aria-label="Attendance views">
+        <button data-tab="daily" class="tab">Daily Report</button>
+        <button data-tab="matrix" class="tab">Status Matrix</button>
+        <button data-tab="summary" class="tab">Overall Summary</button>
+      </nav>
+    </aside>
 
+    <main class="workspace">
   <section id="daily">
     <div id="cards" class="cards"></div>
     <div class="table-wrap">
@@ -70,6 +74,8 @@
       </table>
     </div>
   </section>
+    </main>
+  </div>
 
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
