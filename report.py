@@ -4,7 +4,7 @@ Same columns and rules as the Daily Report on screen:
   LATE TIME       = punch in  - 09:10  (only when after 09:10)
   EARLY LEAVING   = 17:00     - punch out (only when before 17:00)
   WORKING HOURS   = punch out - punch in
-  STATUS          = P (>= 7h) / H (4h to < 7h) / A (otherwise or no record)
+    STATUS          = P (> 5h) / H (4h to 5h inclusive) / A (< 4h, no record, or punch-in after 14:00)
 """
 import io
 import re
@@ -25,7 +25,7 @@ LATE_AFTER = 9 * 60 + 10
 EARLY_BEFORE = 17 * 60
 HEAD = ["SL NO", "EMP NAME", "PUNCH IN TIME", "LATE TIME", "PUNCH OUT",
         "EARLY LEAVING TIME", "TOTAL WORKING HOURS", "STATUS"]
-SUMMARY_HEAD = ["BRANCH", "EMPLOYEES", "PRESENT", "HALF-DAY", "ABSENT"]
+SUMMARY_HEAD = ["BRANCH", "EMPLOYEES", "PRESENT", "HALF-DAY", "ABSENT", "TOTAL WORKING HOURS"]
 
 # status colours (same as the web page): (background, text)
 FILL = {"P": ("DCFCE7", "166534"), "H": ("FEF3C7", "92400E"), "A": ("FEE2E2", "991B1B")}
@@ -51,14 +51,16 @@ def branch_report(rows, iso):
             r = by_key.get((iso, n))
             in_m = S._minutes(r["inT"]) if r else None
             out_m = S._minutes(r["outT"]) if r else None
-            work = out_m - in_m if in_m is not None and out_m is not None and out_m > in_m else 0
+            work = S.work_minutes(r)
             st = S.status_for(r)
             counts[st] += 1
             late = _hm(in_m - LATE_AFTER) if in_m is not None and in_m > LATE_AFTER else ""
             early = _hm(EARLY_BEFORE - out_m) if out_m is not None and out_m < EARLY_BEFORE else ""
             out_txt = _hm(out_m) if out_m is not None else ("No out punch" if in_m is not None else "")
             out.append([i, n, _hm(in_m), late, out_txt, early, _hm(work), st])
-    return {"has_data": has_data, "total": len(names), "counts": counts, "rows": out}
+    work_total = sum(S.work_minutes(by_key.get((iso, name))) for name in names)
+    return {"has_data": has_data, "total": len(names), "work_total": work_total,
+            "counts": counts, "rows": out}
 
 
 def collect(iso):
@@ -68,17 +70,18 @@ def collect(iso):
 
 def _summary_rows(reports):
     rows = []
-    tot = {"emp": 0, "P": 0, "H": 0, "A": 0}
+    tot = {"emp": 0, "work": 0, "P": 0, "H": 0, "A": 0}
     for b, rep in reports:
         if rep["has_data"]:
             c = rep["counts"]
-            rows.append([b, rep["total"], c["P"], c["H"], c["A"]])
+            rows.append([b, rep["total"], c["P"], c["H"], c["A"], _hm(rep["work_total"])])
             tot["emp"] += rep["total"]
+            tot["work"] += rep["work_total"]
             for k in "PHA":
                 tot[k] += c[k]
         else:
-            rows.append([b, rep["total"], "No records for this date", "", ""])
-    rows.append(["TOTAL", tot["emp"], tot["P"], tot["H"], tot["A"]])
+            rows.append([b, rep["total"], "No records for this date", "", "", "00:00"])
+    rows.append(["TOTAL", tot["emp"], tot["P"], tot["H"], tot["A"], _hm(tot["work"])])
     return rows
 
 
@@ -133,7 +136,7 @@ def build_xlsx(iso):
         if isinstance(row[2], str) and row[2].startswith("No records"):
             ws.merge_cells(start_row=i, start_column=3, end_row=i, end_column=5)
             ws.cell(row=i, column=3).font = Font(italic=True, color="94A3B8")
-    for col, w in zip("ABCDE", (28, 12, 12, 12, 12)):
+    for col, w in zip("ABCDEF", (28, 12, 12, 12, 12, 22)):
         ws.column_dimensions[col].width = w
     ws.freeze_panes = "A4"
 
@@ -201,7 +204,7 @@ def build_pdf(iso):
 
     # ---- overall summary ----
     data = [SUMMARY_HEAD] + _summary_rows(reports)
-    t = Table(data, colWidths=[200, 70, 70, 70, 70], repeatRows=1)
+    t = Table(data, colWidths=[140, 55, 60, 60, 60, 95], repeatRows=1)
     style = [("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 8),
              ("FONT", (0, 1), (-1, -1), "Helvetica", 8),
              ("FONT", (0, -1), (-1, -1), "Helvetica-Bold", 8),

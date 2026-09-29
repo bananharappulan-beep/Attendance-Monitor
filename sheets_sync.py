@@ -28,8 +28,10 @@ log = logging.getLogger("attendance.sync")
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 HEADER = "EMPLOYEE NAME"
-PRESENT_MIN = 7 * 60   # >= 7h          -> P
-HALF_MIN = 3 * 60 + 30 # >= 3h30 and < 7h -> H ; otherwise A  (keep in sync with app.js)
+PRESENT_MIN = 5 * 60 + 1  # > 5h -> P (durations are calculated to whole minutes)
+HALF_MIN = 4 * 60      # 4h through 5h -> H
+HALF_MAX = 5 * 60      # 5h inclusive (keep in sync with app.js)
+ABSENT_AFTER = 14 * 60 # Punch-in after 2 PM -> A
 
 _lock = threading.RLock()
 _service = None
@@ -100,16 +102,36 @@ def _minutes(hhmm):
     return int(h) * 60 + int(m)
 
 
-def status_for(row):
-    """P / H / A from PUNCH OUT - PUNCH IN. No record at all counts as A."""
+def _duration_minutes(value):
+    """Parse a Sheets duration such as '7:30' or '7:30:00' into minutes."""
+    match = re.fullmatch(r"\s*(\d+):([0-5]?\d)(?::([0-5]?\d))?\s*", str(value or ""))
+    if not match:
+        return None
+    hours, minutes = int(match.group(1)), int(match.group(2))
+    return hours * 60 + minutes
+
+
+def work_minutes(row):
+    """Use punch times when complete; otherwise use the source duration in column M."""
     if not row:
+        return 0
+    in_minutes, out_minutes = _minutes(row.get("inT", "")), _minutes(row.get("outT", ""))
+    if out_minutes is not None:
+        if out_minutes < 12 * 60 and (out_minutes < in_minutes if in_minutes is not None else out_minutes < 8 * 60):
+            out_minutes += 12 * 60
+        return out_minutes - in_minutes if in_minutes is not None and out_minutes > in_minutes else 0
+    if in_minutes is not None:
+        return _duration_minutes(row.get("dur")) or 0
+    return 0
+
+
+def status_for(row):
+    """P / H / A from punch times or, without punch-out, the source duration."""
+    in_minutes = _minutes(row.get("inT", "")) if row else None
+    if in_minutes is not None and in_minutes > ABSENT_AFTER:
         return "A"
-    i, o = _minutes(row["inT"]), _minutes(row["outT"])
-    # A punch-out earlier than the punch-in (e.g. "04:55" with no AM/PM) is an afternoon time -> PM.
-    if o is not None and o < 12 * 60 and (o < i if i is not None else o < 8 * 60):
-        o += 12 * 60
-    work = o - i if i is not None and o is not None and o > i else 0
-    return "P" if work >= PRESENT_MIN else "H" if work >= HALF_MIN else "A"
+    work = work_minutes(row)
+    return "P" if work >= PRESENT_MIN else "H" if HALF_MIN <= work <= HALF_MAX else "A"
 
 
 # ---------- Google API ----------
@@ -167,6 +189,7 @@ def fetch_source():
 
         i_date, i_code, i_name = idx("date"), idx("employee code"), idx("employee name")
         i_in, i_out = idx("in time"), idx("out time")
+        i_duration = idx("duration") if idx("duration") >= 0 else 12
 
         rows = {}
         for r in values[1:]:
@@ -181,6 +204,7 @@ def fetch_source():
                 "name": name,
                 "inT": t_in.strftime("%H:%M") if t_in else "",
                 "outT": t_out.strftime("%H:%M") if t_out else "",
+                "dur": _cell(r, i_duration).strip(),
             }
         if rows:
             out[tab] = sorted(rows.values(), key=lambda x: (x["d"], x["name"]))
@@ -345,4 +369,4 @@ def get_branches():
 
 
 def get_branch_data(branch):
-    return [dict(r, dur="") for r in _source().get(branch, [])]
+    return [dict(r) for r in _source().get(branch, [])]

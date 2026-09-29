@@ -10,7 +10,7 @@ EMP NAME | 27-09-2026 | 28-09-2026 | 29-09-2026 | 30-09-2026
 BANA     | A          | P          |            |
 ```
 
-P = worked 7h or more, H = 4h to under 7h, A = less than 4h or no record.
+P = worked more than 5h, H = 4h through 5h inclusive, A = less than 4h, no record, or punch-in after 14:00.
 A blank cell means there are no attendance records for that date yet.
 Each sync updates the dates found in the source and keeps the dates already saved.
 

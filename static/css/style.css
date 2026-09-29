@@ -90,6 +90,7 @@ select { min-width: 180px; }
 .data-table th { position: sticky; top: 0; z-index: 5; background: var(--head); text-align: left; padding: .5rem .75rem; white-space: nowrap; box-shadow: 0 1px 0 var(--border); }
 .data-table td { padding: .5rem .75rem; border-top: 1px solid var(--border); }
 .data-table tbody tr:hover { background: var(--bg); }
+.data-table tbody tr.after-2pm { background: var(--red-bg); }
 .data-table .name { font-weight: 500; }
 .late, .early { color: var(--red); }
 .no-out { color: var(--faint); font-style: italic; }
@@ -138,15 +139,15 @@ select { min-width: 180px; }
 /* ---- Overall Summary: bold headings + coloured counts ---- */
 #summary .data-table th { font-weight: 700; letter-spacing: .02em; }
 
-/* column headings (4 = Present, 5 = Absent, 6 = Half day) */
+/* column headings (4 = Present, 5 = Half day, 6 = Absent) */
 #summary .data-table th:nth-child(4) { background: var(--green-bg); color: var(--green-fg); }
-#summary .data-table th:nth-child(5) { background: var(--red-bg);   color: var(--red-fg); }
-#summary .data-table th:nth-child(6) { background: var(--amber-bg); color: var(--amber-fg); }
+#summary .data-table th:nth-child(5) { background: var(--amber-bg); color: var(--amber-fg); }
+#summary .data-table th:nth-child(6) { background: var(--red-bg); color: var(--red-fg); }
 
 /* count values */
 #summary .data-table td:nth-child(4) { color: #16a34a; font-weight: 700; }   /* Present  - green  */
-#summary .data-table td:nth-child(5) { color: #dc2626; font-weight: 700; }   /* Absent   - red    */
-#summary .data-table td:nth-child(6) { color: #ca8a04; font-weight: 700; }   /* Half day - yellow */
+#summary .data-table td:nth-child(5) { color: #ca8a04; font-weight: 700; }   /* Half day - yellow */
+#summary .data-table td:nth-child(6) { color: #dc2626; font-weight: 700; }   /* Absent   - red    */
 
 /* ---- Overall Summary alignment: everything centred except the branch names ---- */
 #summary .data-table th,

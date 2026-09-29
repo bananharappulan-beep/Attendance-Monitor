@@ -5,8 +5,10 @@ const API_URL = '';
 
 const LATE_AFTER = 9 * 60 + 10;   // 09:10
 const EARLY_BEFORE = 17 * 60;     // 17:00
-const PRESENT_MIN = 7 * 60;       // >= 7h  -> P
-const HALF_MIN = 3 * 60 + 30;   // >= 3h30 (rounds to 4h) and < 7h -> H ; below 3h30 (or 0) -> A
+const PRESENT_MIN = 5 * 60 + 1;   // > 5h -> P (durations are calculated to whole minutes)
+const HALF_MIN = 4 * 60;          // 4h through 5h -> H
+const HALF_MAX = 5 * 60;          // 5h inclusive
+const ABSENT_AFTER = 14 * 60;     // Punch-in after 2 PM -> A
 
 // ---------- Helpers ----------
 const $ = id => document.getElementById(id);
@@ -30,7 +32,14 @@ function toMin(s) {
   return h * 60 + +m[2];
 }
 
-function status(min) { return min >= PRESENT_MIN ? 'P' : min >= HALF_MIN ? 'H' : 'A'; }
+function status(min) {
+  return min >= PRESENT_MIN ? 'P' : (min >= HALF_MIN && min <= HALF_MAX ? 'H' : 'A');
+}
+
+function durationMinutes(value) {
+  const m = String(value || '').match(/^\s*(\d+):([0-5]?\d)(?::([0-5]?\d))?\s*$/);
+  return m ? (+m[1] * 60 + +m[2]) : null;
+}
 
 // Punch-out without AM/PM (e.g. "04:55") that is earlier than punch-in (or before 08:00 with no
 // punch-in) can only be an afternoon time -> treat as PM (04:55 -> 16:55).
@@ -43,8 +52,11 @@ function fixOut(inM, outM, raw) {
 function analyse(r) {
   if (!r) return { inM: null, outM: null, work: 0, st: 'A' };
   const inM = toMin(r.inT), outM = fixOut(inM, toMin(r.outT), r.outT);
-  const work = inM != null && outM != null && outM > inM ? outM - inM : 0; // PUNCH OUT - PUNCH IN
-  return { inM, outM, work, st: status(work) };
+  const work = inM != null && outM != null && outM > inM
+    ? outM - inM
+    : (inM != null && outM == null ? (durationMinutes(r.dur) || 0) : 0);
+  const st = inM != null && inM > ABSENT_AFTER ? 'A' : status(work);
+  return { inM, outM, work, st };
 }
 
 const pill = s => `<span class="pill ${s}">${s}</span>`;
@@ -86,12 +98,13 @@ function renderDaily() {
   $('dailyBody').innerHTML = names.map((n, i) => {
     const a = analyse(byKey.get(d + '|' + n));
     cnt[a.st]++;
+    const afterTwoPm = a.inM != null && a.inM > ABSENT_AFTER;
     const late = a.inM != null && a.inM > LATE_AFTER ? fmtHM(a.inM - LATE_AFTER) : '';
     const early = a.outM != null && a.outM < EARLY_BEFORE ? fmtHM(EARLY_BEFORE - a.outM) : '';
     const out = a.outM != null
       ? fmt12(a.outM)
       : (a.inM != null ? '<span class="no-out">No out punch</span>' : '');
-    return `<tr>
+    return `<tr class="${afterTwoPm ? 'after-2pm' : ''}">
       <td>${i + 1}</td><td class="name">${esc(n)}</td>
       <td>${fmt12(a.inM)}</td>
       <td class="late">${late}</td>
@@ -277,7 +290,7 @@ async function exportAllPdf() {
 // ---------- Overall summary (all branches, selected date) ----------
 async function loadSummary() {
   const body = $('summaryBody');
-  body.innerHTML = `<tr><td colspan="6" class="empty">Loading…</td></tr>`;
+  body.innerHTML = `<tr><td colspan="7" class="empty">Loading…</td></tr>`;
   try {
     // Uses the same analyse() as the Daily Report, so the two views can never disagree.
     const branches = await api('/api/branches');
@@ -289,22 +302,27 @@ async function loadSummary() {
         const emp = [...new Set(data.map(r => r.name))];
         const day = new Map(data.filter(r => r.d === date).map(r => [r.name, r]));
         const cnt = { P: 0, H: 0, A: 0 };
-        emp.forEach(n => cnt[analyse(day.get(n)).st]++);   // no record that day -> Absent
-        return { branch, total: emp.length, present: cnt.P, absent: cnt.A, half: cnt.H };
+        let work = 0;
+        emp.forEach(n => {
+          const a = analyse(day.get(n));
+          cnt[a.st]++;   // no record that day -> Absent
+          work += a.work;
+        });
+        return { branch, total: emp.length, work, present: cnt.P, absent: cnt.A, half: cnt.H };
       })
     };
-    const tot = { total: 0, present: 0, absent: 0, half: 0 };
+    const tot = { total: 0, work: 0, present: 0, absent: 0, half: 0 };
     let html = s.rows.map((r, i) => {
       Object.keys(tot).forEach(k => tot[k] += r[k]);
       return `<tr><td>${i + 1}</td><td class="name">${esc(r.branch)}</td>
-        <td>${r.total}</td><td>${r.present}</td><td>${r.absent}</td><td>${r.half}</td></tr>`;
+        <td>${r.total}</td><td>${r.present}</td><td>${r.half}</td><td>${r.absent}</td><td>${fmtHM(r.work)}</td></tr>`;
     }).join('');
     if (s.rows.length)
       html += `<tr class="total-row"><td></td><td>TOTAL</td>
-        <td>${tot.total}</td><td>${tot.present}</td><td>${tot.absent}</td><td>${tot.half}</td></tr>`;
-    body.innerHTML = html || `<tr><td colspan="6" class="empty">No data</td></tr>`;
+        <td>${tot.total}</td><td>${tot.present}</td><td>${tot.half}</td><td>${tot.absent}</td><td>${fmtHM(tot.work)}</td></tr>`;
+    body.innerHTML = html || `<tr><td colspan="7" class="empty">No data</td></tr>`;
   } catch (e) {
-    body.innerHTML = `<tr><td colspan="6" class="empty">Error: ${esc(e.message || e)}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="7" class="empty">Error: ${esc(e.message || e)}</td></tr>`;
   }
 }
 
