@@ -71,9 +71,28 @@ async function api(path, params) {
 }
 
 // ---------- State ----------
+const CORE_OFFICES = {
+  MAGNUS: ['CORE OFFICE', 'R&D', 'FR', 'FCO']
+};
+const BUSINESS_ORDER = ['MAGNUS', 'ALIMS', 'M&D', 'MERCHX', 'HU'];
+const BUSINESS_BRANCHES = {
+  MAGNUS: ['Manjeri', 'Kasargod', 'Kannur', 'Kuttivadi', 'Kozhikode', 'Tirur', 'Palakkad', 'Thrissur', 'Ernakulam', 'Alappuzha', 'Kottayam', 'Kollam', 'Trivandrum', 'Marthandam', 'Nagpur', 'Hyderabad', 'Bangalore'],
+  ALIMS: ['Manjeri', 'Kozhikode', 'Ernakulam', 'Thrissur', 'Trivandrum'],
+  'M&D': ['Manjeri', 'Ernakulam'],
+  MERCHX: ['Manjeri', 'Kozhikode', 'Thrissur', 'Ernakulam'],
+  HU: ['Manjeri']
+};
+const BRANCH_SOURCE_ALIASES = {
+  'MAGNUS|Kuttivadi': 'KUTTIYADI',
+  'MERCHX|Manjeri': 'MERCHX MANJERI',
+  'HU|Manjeri': 'HU MANJERI'
+};
 let rows = [];              // rows of the selected branch
 let byKey = new Map();      // "date|name" -> row
 let names = [];
+let availableBranches = [];
+let allBusinessType = 'MAGNUS';
+let selectedLocationType = 'branch';
 
 function indexRows() {
   byKey = new Map();
@@ -154,7 +173,9 @@ function setMonthRange() {
 async function loadBranch() {
   setMsg('Loading…');
   try {
-    rows = await api('/api/data', { branch: $('branch').value });
+    const selectedBranch = $('branch').selectedOptions[0];
+    const sourceBranch = selectedBranch?.dataset.source || $('branch').value;
+    rows = await api('/api/data', { branch: sourceBranch });
     indexRows();
     const latest = rows.map(r => r.d).sort().pop();
     if (!$('date').value || !rows.some(r => r.d === $('date').value))
@@ -167,10 +188,87 @@ async function loadBranch() {
 }
 
 async function loadBranches() {
-  const b = await api('/api/branches');
-  $('branch').innerHTML = b.map(x => `<option>${esc(x)}</option>`).join('');
-  if (!b.length) setMsg('No branches found in the source sheet. Check SHEET_ID and that the tabs have data.');
-  else await loadBranch();
+  availableBranches = await api('/api/branches');
+  await updateBranchOptions();
+}
+
+async function updateBranchOptions() {
+  const branchSelect = $('branch');
+  const currentOption = branchSelect.selectedOptions[0];
+  const currentBusiness = currentOption?.dataset.business;
+  const currentBranch = currentOption?.dataset.branch;
+  let options;
+  const allBusinessSelected = $('businessName').value === 'ALL';
+  const business = allBusinessSelected ? $('locationType').value : $('businessName').value;
+  const coreOffices = CORE_OFFICES[business] || [];
+  if (!allBusinessSelected && $('locationType').value === 'core-office' && coreOffices.length) {
+    options = coreOffices.map(branch => ({
+      business: 'MAGNUS', branch,
+      source: branch === 'CORE OFFICE' ? 'HEAD OFFICE' : branch,
+      label: branch,
+      value: `MAGNUS|office|${branch}`
+    }));
+  } else {
+    options = BUSINESS_BRANCHES[business].map(branch => {
+      const sourceName = BRANCH_SOURCE_ALIASES[`${business}|${branch}`] || branch.toUpperCase();
+      const source = availableBranches.find(name => name.toUpperCase() === sourceName.toUpperCase()) || sourceName;
+      return {
+        business, branch, source,
+        label: allBusinessSelected && business !== 'MAGNUS' ? `${branch} (${business})` : branch,
+        value: `${business}|${branch}`
+      };
+    });
+  }
+  branchSelect.innerHTML = options.map(option =>
+    `<option value="${esc(option.value)}" data-source="${esc(option.source)}" data-business="${esc(option.business)}" data-branch="${esc(option.branch)}">${esc(option.label)}</option>`
+  ).join('');
+  if (!options.length) {
+    rows = [];
+    indexRows();
+    renderDaily();
+    renderMatrix();
+    setMsg('No branches found in the source sheet. Check SHEET_ID and that the tabs have data.', true);
+    return;
+  }
+  const selection = options.find(option => option.business === currentBusiness && option.branch === currentBranch)
+    || options.find(option => option.branch === currentBranch)
+    || options[0];
+  branchSelect.value = selection.value;
+  await loadBranch();
+}
+
+function updateLocationTypeOptions() {
+  const locationType = $('locationType');
+  const isAllBusiness = $('businessName').value === 'ALL';
+  const wasBusinessType = locationType.dataset.mode === 'business-type';
+  const currentBranchBusiness = $('branch').selectedOptions[0]?.dataset.business;
+
+  if (wasBusinessType) allBusinessType = locationType.value;
+  else selectedLocationType = locationType.value;
+  if (!wasBusinessType && BUSINESS_ORDER.includes(currentBranchBusiness))
+    allBusinessType = currentBranchBusiness;
+
+  if (isAllBusiness) {
+    $('locationTypeLabel').textContent = 'Business Type';
+    locationType.innerHTML = BUSINESS_ORDER.map(business =>
+      `<option value="${esc(business)}">${esc(business)}</option>`
+    ).join('');
+    locationType.value = allBusinessType;
+    locationType.dataset.mode = 'business-type';
+    return;
+  }
+
+  const coreOffices = CORE_OFFICES[$('businessName').value] || [];
+  if (!coreOffices.length && selectedLocationType === 'core-office') selectedLocationType = 'branch';
+  $('locationTypeLabel').textContent = 'Location Type';
+  const locationOptions = coreOffices.length
+    ? [['core-office', 'CORE OFFICE'], ['branch', 'BRANCH']]
+    : [['branch', 'BRANCH']];
+  locationType.innerHTML = locationOptions.map(([value, label]) =>
+    `<option value="${value}">${label}</option>`
+  ).join('');
+  locationType.value = selectedLocationType;
+  locationType.dataset.mode = 'location-type';
 }
 
 async function syncSheet() {
@@ -264,8 +362,9 @@ async function exportBranchPdf() {
   const date = $('date').value;
   if (!(await pdfReady())) return;
   if (!date || !rows.length) return setMsg('No data to export for this branch/date.', true);
-  makePdf($('branch').value, rows, date);
-  setMsg(`Exported ${$('branch').value}.pdf`);
+  const branch = $('branch').selectedOptions[0]?.textContent || $('branch').value;
+  makePdf(branch, rows, date);
+  setMsg(`Exported ${branch}.pdf`);
 }
 
 async function exportAllPdf() {
@@ -284,6 +383,43 @@ async function exportAllPdf() {
     setMsg(`Downloaded ${branches.length} branch PDF(s) for ${dmy(date)}. If some are missing, allow multiple downloads in your browser.`);
   } catch (e) { setMsg('Export error: ' + (e.message || e), true); }
   btn.disabled = false;
+}
+
+async function exportTablePdf(tableId, title, filename, options = {}) {
+  if (!(await pdfReady())) return;
+  const table = $(tableId);
+  if (!table || !table.querySelector('thead tr') || !table.querySelector('tbody tr') || table.querySelector('tbody .empty'))
+    return setMsg('No data to export for this view.', true);
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: options.landscape ? 'landscape' : 'portrait' });
+  doc.setFontSize(16);
+  doc.text(title, 40, 40);
+  doc.autoTable({
+    html: table,
+    startY: 58,
+    margin: 32,
+    styles: { fontSize: options.landscape ? 7 : 8, cellPadding: 4 },
+    headStyles: { fillColor: [15, 23, 42] },
+    horizontalPageBreak: Boolean(options.landscape),
+    horizontalPageBreakRepeat: options.landscape ? [0] : undefined
+  });
+  doc.save(filename);
+  setMsg(`Exported ${filename}`);
+}
+
+function exportMatrixPdf() {
+  const branch = $('branch').selectedOptions[0]?.textContent || $('branch').value;
+  const from = $('from').value, to = $('to').value;
+  const range = from && to ? `${dmy(from)} - ${dmy(to)}` : '';
+  const safeBranch = String(branch).replace(/[\\/:*?"<>|]/g, '_').trim();
+  return exportTablePdf('matrixTable', `${branch} - Status Matrix${range ? ` (${range})` : ''}`,
+    `${safeBranch}-status-matrix.pdf`, { landscape: true });
+}
+
+function exportSummaryPdf() {
+  const title = `Overall Summary${$('summaryHint').textContent ? ` - ${$('summaryHint').textContent}` : ''}`;
+  return exportTablePdf('summaryTable', title, 'overall-summary.pdf');
 }
 
 // ---------- Tabs & events ----------
@@ -349,10 +485,18 @@ ensureExportBar();
 document.querySelectorAll('.tab').forEach(b => b.onclick = () => showTab(b.dataset.tab));
 const summaryOpen = () => $('summary') && !$('summary').classList.contains('hidden');
 on('branch', 'onchange', () => { $('date').value = ''; loadBranch(); });
+on('locationType', 'onchange', () => {
+  if ($('businessName').value === 'ALL') allBusinessType = $('locationType').value;
+  else selectedLocationType = $('locationType').value;
+  updateBranchOptions();
+});
+on('businessName', 'onchange', () => { updateLocationTypeOptions(); updateBranchOptions(); });
 on('refresh', 'onclick', async () => { await loadBranch(); if (summaryOpen()) loadSummary(); });
 on('sync', 'onclick', syncSheet);
 on('exportPdf', 'onclick', exportBranchPdf);
 on('exportAll', 'onclick', exportAllPdf);
+on('exportMatrixPdf', 'onclick', exportMatrixPdf);
+on('exportSummaryPdf', 'onclick', exportSummaryPdf);
 on('date', 'onchange', () => { setMonthRange(); renderDaily(); renderMatrix(); if (summaryOpen()) loadSummary(); });
 on('from', 'onchange', renderMatrix);
 on('to', 'onchange', renderMatrix);
@@ -361,6 +505,7 @@ on('to', 'onchange', renderMatrix);
 window.addEventListener('error', e => setMsg('Script error: ' + e.message, true));
 
 (async () => {
+  updateLocationTypeOptions();
   showTab('daily');
   try { await loadBranches(); }
   catch (e) { setMsg('Error: ' + (e.message || e), true); }

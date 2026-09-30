@@ -27,6 +27,22 @@
 
   <div class="app-layout">
     <aside class="sidebar">
+      <label class="sidebar-filter">Business Name
+        <select id="businessName">
+          <option value="ALL">ALL BUSINESS</option>
+          <option value="MAGNUS" selected>MAGNUS</option>
+          <option value="ALIMS">ALIMS</option>
+          <option value="MERCHX">MERCHX</option>
+          <option value="M&amp;D">M&amp;D</option>
+          <option value="HU">HU</option>
+        </select>
+      </label>
+      <label class="sidebar-filter"><span id="locationTypeLabel">Location Type</span>
+        <select id="locationType">
+          <option value="core-office">CORE OFFICE</option>
+          <option value="branch" selected>BRANCH</option>
+        </select>
+      </label>
       <nav class="tabs" aria-label="Attendance views">
         <button data-tab="daily" class="tab">Daily Report</button>
         <button data-tab="matrix" class="tab">Status Matrix</button>
@@ -58,12 +74,15 @@
     <div class="table-wrap matrix-wrap">
       <table id="matrixTable" class="matrix-table"></table>
     </div>
+    <div class="export-bar">
+      <button id="exportMatrixPdf" class="btn-export" title="Download this branch's Status Matrix as PDF"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export to PDF</button>
+    </div>
   </section>
 
   <section id="summary" class="hidden">
     <div class="hint" id="summaryHint"></div>
     <div class="table-wrap">
-      <table class="data-table">
+      <table id="summaryTable" class="data-table">
         <thead>
           <tr>
             <th>SL NO</th><th>BRANCH</th><th>TOTAL EMPLOYEES</th>
@@ -72,6 +91,9 @@
         </thead>
         <tbody id="summaryBody"></tbody>
       </table>
+    </div>
+    <div class="export-bar">
+      <button id="exportSummaryPdf" class="btn-export" title="Download the Overall Summary as PDF"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export to PDF</button>
     </div>
   </section>
     </main>
