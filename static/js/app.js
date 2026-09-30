@@ -430,37 +430,81 @@ function exportSummaryPdf() {
 }
 
 // ---------- Tabs & events ----------
-// ---------- Overall summary (all branches, selected date) ----------
+// ---------- Overall summary (selected business scope, selected date) ----------
 async function loadSummary() {
   const body = $('summaryBody');
   body.innerHTML = `<tr><td colspan="7" class="empty">Loading…</td></tr>`;
   try {
-    // Uses the same analyse() as the Daily Report, so the two views can never disagree.
+    const allBusinesses = $('businessName').value === 'ALL';
+    const selectedBusiness = $('businessName').value;
+    const locationType = $('locationType').value;
+    const businesses = allBusinesses ? BUSINESS_ORDER : [selectedBusiness];
     const branches = await api('/api/branches');
     const all = await Promise.all(branches.map(async b => ({ branch: b, data: await api('/api/data', { branch: b }) })));
     const date = $('date').value || all.flatMap(x => x.data.map(r => r.d)).sort().pop() || '';
-    $('summaryHint').textContent = date ? `Attendance summary for ${dmy(date)} (all branches)` : '';
-    const s = {
-      rows: all.map(({ branch, data }) => {
-        const emp = [...new Set(data.map(r => r.name))];
-        const day = new Map(data.filter(r => r.d === date).map(r => [r.name, r]));
-        const cnt = { P: 0, H: 0, A: 0 };
-        let work = 0;
-        emp.forEach(n => {
-          const a = analyse(day.get(n));
-          cnt[a.st]++;   // no record that day -> Absent
-          work += a.work;
-        });
-        return { branch, total: emp.length, work, present: cnt.P, absent: cnt.A, half: cnt.H };
-      })
-    };
+    const selectedScope = allBusinesses
+      ? 'ALL BUSINESSES'
+      : selectedBusiness === 'MAGNUS'
+        ? `MAGNUS: ${locationType === 'core-office' ? 'CORE OFFICE' : 'BRANCH'}`
+        : selectedBusiness;
+    $('summaryHint').textContent = date ? `Attendance summary for ${dmy(date)} (${selectedScope})` : '';
+
+    // Uses the same analyse() as the Daily Report, so the two views can never disagree.
+    const rowsByBranch = new Map(await Promise.all(all.map(async ({ branch, data }) => {
+      const emp = [...new Set(data.map(r => r.name))];
+      const day = new Map(data.filter(r => r.d === date).map(r => [r.name, r]));
+      const cnt = { P: 0, H: 0, A: 0 };
+      let work = 0;
+      emp.forEach(n => {
+        const a = analyse(day.get(n));
+        cnt[a.st]++;
+        work += a.work;
+      });
+      return [branch.toUpperCase(), {
+        branch, total: emp.length, work, present: cnt.P, absent: cnt.A, half: cnt.H
+      }];
+    })));
+    const mappedBranches = new Set();
+    const groups = [];
+    businesses.forEach(business => {
+      const branchRows = (BUSINESS_BRANCHES[business] || []).map(branch => {
+        const source = BRANCH_SOURCE_ALIASES[`${business}|${branch}`] || branch.toUpperCase();
+        return rowsByBranch.get(source.toUpperCase());
+      }).filter(Boolean);
+      branchRows.forEach(row => mappedBranches.add(row.branch));
+      const officeRows = business === 'MAGNUS'
+        ? CORE_OFFICES[business].map(branch => rowsByBranch.get(CORE_OFFICE_SOURCE_ALIASES[branch].toUpperCase())).filter(Boolean)
+        : [];
+      officeRows.forEach(row => mappedBranches.add(row.branch));
+
+      if (business === 'MAGNUS') {
+        if (allBusinesses || locationType === 'branch')
+          groups.push({ label: 'MAGNUS: BRANCH', rows: branchRows });
+        if (allBusinesses || locationType === 'core-office')
+          groups.push({ label: 'MAGNUS: CORE OFFICE', rows: officeRows });
+      } else {
+        groups.push({ label: business, rows: branchRows });
+      }
+    });
+    if (allBusinesses) {
+      const otherBranches = [...rowsByBranch.values()].filter(row => !mappedBranches.has(row.branch));
+      if (otherBranches.length) groups.push({ label: 'OTHER', rows: otherBranches });
+    }
+    const visibleGroups = groups.filter(group => group.rows.length);
+    const includedRows = [...new Map(visibleGroups.flatMap(group => group.rows).map(row => [row.branch, row])).values()];
     const tot = { total: 0, work: 0, present: 0, absent: 0, half: 0 };
-    let html = s.rows.map((r, i) => {
-      Object.keys(tot).forEach(k => tot[k] += r[k]);
-      return `<tr><td>${i + 1}</td><td class="name">${esc(r.branch)}</td>
-        <td>${r.total}</td><td>${r.present}</td><td>${r.half}</td><td>${r.absent}</td><td>${fmtHM(r.work)}</td></tr>`;
+    includedRows.forEach(r => Object.keys(tot).forEach(k => tot[k] += r[k]));
+    let serial = 0;
+    let html = visibleGroups.map(group => {
+      const subtotal = { total: 0, work: 0, present: 0, absent: 0, half: 0 };
+      group.rows.forEach(r => Object.keys(subtotal).forEach(k => subtotal[k] += r[k]));
+      const businessRow = `<tr class="business-row"><td></td><td>${esc(group.label)}</td>
+        <td>${subtotal.total}</td><td>${subtotal.present}</td><td>${subtotal.half}</td><td>${subtotal.absent}</td><td>${fmtHM(subtotal.work)}</td></tr>`;
+      const branchRows = group.rows.map(r => `<tr><td>${++serial}</td><td class="name summary-branch">${esc(r.branch)}</td>
+        <td>${r.total}</td><td>${r.present}</td><td>${r.half}</td><td>${r.absent}</td><td>${fmtHM(r.work)}</td></tr>`).join('');
+      return businessRow + branchRows;
     }).join('');
-    if (s.rows.length)
+    if (includedRows.length)
       html += `<tr class="total-row"><td></td><td>TOTAL</td>
         <td>${tot.total}</td><td>${tot.present}</td><td>${tot.half}</td><td>${tot.absent}</td><td>${fmtHM(tot.work)}</td></tr>`;
     body.innerHTML = html || `<tr><td colspan="7" class="empty">No data</td></tr>`;
@@ -496,8 +540,13 @@ on('locationType', 'onchange', () => {
   if ($('businessName').value === 'ALL') allBusinessType = $('locationType').value;
   else selectedLocationType = $('locationType').value;
   updateBranchOptions();
+  if (summaryOpen()) loadSummary();
 });
-on('businessName', 'onchange', () => { updateLocationTypeOptions(); updateBranchOptions(); });
+on('businessName', 'onchange', () => {
+  updateLocationTypeOptions();
+  updateBranchOptions();
+  if (summaryOpen()) loadSummary();
+});
 on('refresh', 'onclick', async () => { await loadBranch(); if (summaryOpen()) loadSummary(); });
 on('sync', 'onclick', syncSheet);
 on('exportPdf', 'onclick', exportBranchPdf);
