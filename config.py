@@ -20,6 +20,8 @@ class Config:
 
     # Source: raw punch data (one tab per branch). Read only.
     SHEET_ID = _get("SHEET_ID", "1MkAWVc_f5TOA1y96PJolQ4wCAu2shLKVPrpjMGvRll0")
+    # Optional second source for Head Office branches. Read only.
+    CORE_OFFICE_SHEET_ID = _get("CORE_OFFICE_SHEET_ID")
     # Output: P/H/A matrix (one worksheet per branch). Read + write.
     OUTPUT_SHEET_ID = _get("OUTPUT_SHEET_ID")
 

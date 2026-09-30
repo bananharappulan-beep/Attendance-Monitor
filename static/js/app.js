@@ -72,15 +72,22 @@ async function api(path, params) {
 
 // ---------- State ----------
 const CORE_OFFICES = {
-  MAGNUS: ['CORE OFFICE', 'R&D', 'FR', 'FCO']
+  MAGNUS: ['HEAD OFFICE', 'R&D', 'FR', 'FCO']
 };
-const BUSINESS_ORDER = ['MAGNUS', 'ALIMS', 'M&D', 'MERCHX', 'HU'];
+const CORE_OFFICE_SOURCE_ALIASES = {
+  'HEAD OFFICE': 'HEAD OFFICE',
+  'R&D': 'MANJERI R&D',
+  FR: 'MANJERI FR',
+  FCO: 'FCO MANJERI'
+};
+const BUSINESS_ORDER = ['MAGNUS', 'ALIMS', 'M&D', 'MERCHX', 'HU', 'GRANDIS'];
 const BUSINESS_BRANCHES = {
   MAGNUS: ['Manjeri', 'Kasargod', 'Kannur', 'Kuttivadi', 'Kozhikode', 'Tirur', 'Palakkad', 'Thrissur', 'Ernakulam', 'Alappuzha', 'Kottayam', 'Kollam', 'Trivandrum', 'Marthandam', 'Nagpur', 'Hyderabad', 'Bangalore'],
   ALIMS: ['Manjeri', 'Kozhikode', 'Ernakulam', 'Thrissur', 'Trivandrum'],
   'M&D': ['Manjeri', 'Ernakulam'],
   MERCHX: ['Manjeri', 'Kozhikode', 'Thrissur', 'Ernakulam'],
-  HU: ['Manjeri']
+  HU: ['Manjeri'],
+  GRANDIS: ['Thoduppuzha', 'Chennai']
 };
 const BRANCH_SOURCE_ALIASES = {
   'MAGNUS|Kuttivadi': 'KUTTIYADI',
@@ -204,7 +211,7 @@ async function updateBranchOptions() {
   if (!allBusinessSelected && $('locationType').value === 'core-office' && coreOffices.length) {
     options = coreOffices.map(branch => ({
       business: 'MAGNUS', branch,
-      source: branch === 'CORE OFFICE' ? 'HEAD OFFICE' : branch,
+      source: CORE_OFFICE_SOURCE_ALIASES[branch],
       label: branch,
       value: `MAGNUS|office|${branch}`
     }));
@@ -214,7 +221,7 @@ async function updateBranchOptions() {
       const source = availableBranches.find(name => name.toUpperCase() === sourceName.toUpperCase()) || sourceName;
       return {
         business, branch, source,
-        label: allBusinessSelected && business !== 'MAGNUS' ? `${branch} (${business})` : branch,
+        label: branch,
         value: `${business}|${branch}`
       };
     });

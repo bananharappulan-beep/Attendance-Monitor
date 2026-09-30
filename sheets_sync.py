@@ -163,52 +163,59 @@ def _sheets():
 def fetch_source():
     """-> {branch: [{d, code, name, inT, outT}, ...]}  (one request for all tabs)."""
     api = _sheets().spreadsheets()
-    meta = api.get(spreadsheetId=Config.SHEET_ID, fields="sheets.properties.title").execute()
-    tabs = [
-        s["properties"]["title"]
-        for s in meta.get("sheets", [])
-        if s["properties"]["title"] not in Config.SKIP_TABS
-    ]
-    if not tabs:
-        return {}
-    res = api.values().batchGet(
-        spreadsheetId=Config.SHEET_ID,
-        ranges=[_quote(t) for t in tabs],
-        valueRenderOption="FORMATTED_VALUE",
-    ).execute()
-
     out = {}
-    for tab, vr in zip(tabs, res.get("valueRanges", [])):
-        values = vr.get("values", [])
-        if len(values) < 2:
+    source_ids = dict.fromkeys(
+        sheet_id for sheet_id in (Config.SHEET_ID, Config.CORE_OFFICE_SHEET_ID) if sheet_id
+    )
+    for sheet_id in source_ids:
+        meta = api.get(
+            spreadsheetId=sheet_id, fields="sheets.properties.title"
+        ).execute()
+        tabs = [
+            s["properties"]["title"]
+            for s in meta.get("sheets", [])
+            if s["properties"]["title"] not in Config.SKIP_TABS
+        ]
+        if not tabs:
             continue
-        header = [str(h).strip().lower() for h in values[0]]
+        res = api.values().batchGet(
+            spreadsheetId=sheet_id,
+            ranges=[_quote(t) for t in tabs],
+            valueRenderOption="FORMATTED_VALUE",
+        ).execute()
 
-        def idx(name):
-            return header.index(name) if name in header else -1
-
-        i_date, i_code, i_name = idx("date"), idx("employee code"), idx("employee name")
-        i_in, i_out = idx("in time"), idx("out time")
-        i_duration = idx("duration") if idx("duration") >= 0 else 12
-
-        rows = {}
-        for r in values[1:]:
-            name = _cell(r, i_name).strip()
-            d = parse_date(_cell(r, i_date))
-            if not name or d is None:
+        for tab, vr in zip(tabs, res.get("valueRanges", [])):
+            values = vr.get("values", [])
+            if len(values) < 2:
                 continue
-            t_in, t_out = parse_time(_cell(r, i_in)), parse_time(_cell(r, i_out))
-            rows[(d.isoformat(), name)] = {
-                "d": d.isoformat(),
-                "code": _cell(r, i_code),
-                "name": name,
-                "inT": t_in.strftime("%H:%M") if t_in else "",
-                "outT": t_out.strftime("%H:%M") if t_out else "",
-                "dur": _cell(r, i_duration).strip(),
-            }
-        if rows:
-            out[tab] = sorted(rows.values(), key=lambda x: (x["d"], x["name"]))
-    return out
+            header = [str(h).strip().lower() for h in values[0]]
+
+            def idx(name):
+                return header.index(name) if name in header else -1
+
+            i_date, i_code, i_name = idx("date"), idx("employee code"), idx("employee name")
+            i_in, i_out = idx("in time"), idx("out time")
+            i_duration = idx("duration") if idx("duration") >= 0 else 12
+
+            rows = out.setdefault(tab, {})
+            for r in values[1:]:
+                name = _cell(r, i_name).strip()
+                d = parse_date(_cell(r, i_date))
+                if not name or d is None:
+                    continue
+                t_in, t_out = parse_time(_cell(r, i_in)), parse_time(_cell(r, i_out))
+                rows[(d.isoformat(), name)] = {
+                    "d": d.isoformat(),
+                    "code": _cell(r, i_code),
+                    "name": name,
+                    "inT": t_in.strftime("%H:%M") if t_in else "",
+                    "outT": t_out.strftime("%H:%M") if t_out else "",
+                    "dur": _cell(r, i_duration).strip(),
+                }
+    return {
+        tab: sorted(rows.values(), key=lambda x: (x["d"], x["name"]))
+        for tab, rows in out.items() if rows
+    }
 
 
 # ---------- build / merge the matrix ----------
