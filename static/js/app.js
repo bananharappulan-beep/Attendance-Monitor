@@ -645,26 +645,42 @@ async function loadInactive() {
   const body = $('inactiveBody');
   const startDate = $('inactiveStartDate').value;
   const days = Math.max(1, Number.parseInt($('inactiveDays').value, 10) || 2);
-  body.innerHTML = '<tr><td colspan="3" class="empty">Loading inactive employees…</td></tr>';
+  body.innerHTML = '<tr><td colspan="2" class="empty">Loading inactive employees…</td></tr>';
   try {
     const params = { n_days: String(days) };
     if (startDate) params.start_date = startDate;
     const inactiveByBranch = await api('/api/inactive', params);
+    const branchSelect = $('branch');
+    const knownBranches = new Set(
+      [...branchSelect.options].map(option => String(option.dataset.source || option.value).toUpperCase())
+    );
+    Object.keys(inactiveByBranch).forEach(branch => {
+      if (knownBranches.has(branch.toUpperCase())) return;
+      const option = new Option(branch, branch);
+      option.dataset.source = branch;
+      option.dataset.business = '';
+      option.dataset.branch = branch;
+      branchSelect.add(option);
+      knownBranches.add(branch.toUpperCase());
+    });
+    const selectedOption = branchSelect.selectedOptions[0];
+    const selectedBranch = String(selectedOption?.dataset.source || branchSelect.value || '').toUpperCase();
     $('inactiveHint').textContent = startDate
       ? `Absent on ${days} archived dates from ${dmy(startDate)} onward.`
       : `Absent on the latest ${days} archived dates.`;
-    const employees = Object.entries(inactiveByBranch).flatMap(([branch, rows]) =>
-      rows.map(row => ({
-        branch,
+    const employees = Object.entries(inactiveByBranch)
+      .filter(([branch]) => branch.toUpperCase() === selectedBranch)
+      .flatMap(([, rows]) =>
+        rows.map(row => ({
         code: row['EMPLOYEE CODE'] || '',
         name: row['EMPLOYEE NAME'] || ''
-      }))
-    ).sort((a, b) => a.branch.localeCompare(b.branch) || a.name.localeCompare(b.name));
+        }))
+      ).sort((a, b) => a.name.localeCompare(b.name));
     body.innerHTML = employees.map(row => `<tr>
-      <td>${esc(row.branch)}</td><td>${esc(row.code)}</td><td class="name">${esc(row.name)}</td>
-    </tr>`).join('') || `<tr><td colspan="3" class="empty">No inactive employees found for ${days} archived dates.</td></tr>`;
+      <td>${esc(row.code)}</td><td class="name">${esc(row.name)}</td>
+    </tr>`).join('') || `<tr><td colspan="2" class="empty">No inactive employees found for ${days} archived dates.</td></tr>`;
   } catch (e) {
-    body.innerHTML = `<tr><td colspan="3" class="empty">Error: ${esc(e.message || e)}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="2" class="empty">Error: ${esc(e.message || e)}</td></tr>`;
   }
 }
 
@@ -768,7 +784,11 @@ ensureExportBar();
 
 document.querySelectorAll('.tab').forEach(b => b.onclick = () => showTab(b.dataset.tab));
 const summaryOpen = () => $('summary') && !$('summary').classList.contains('hidden');
-on('branch', 'onchange', () => { $('date').value = ''; loadBranch(); });
+on('branch', 'onchange', () => {
+  $('date').value = '';
+  loadBranch();
+  if (!$('inactive').classList.contains('hidden')) loadInactive();
+});
 on('locationType', 'onchange', () => {
   if ($('businessName').value === 'ALL') allBusinessType = $('locationType').value;
   else selectedLocationType = $('locationType').value;

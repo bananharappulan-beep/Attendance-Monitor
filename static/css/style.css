@@ -94,6 +94,7 @@ select { min-width: 180px; }
 
 /* tables */
 .table-wrap { overflow: auto; max-height: 70vh; background: #fff; border: 1px solid var(--border); border-radius: .5rem; }
+.inactive-table-wrap { height: 70vh; max-height: none; }
 .data-table { width: 100%; border-collapse: collapse; font-size: .9375rem; }
 .data-table th { position: sticky; top: 0; z-index: 5; background: var(--head); text-align: left; padding: .625rem .75rem; white-space: nowrap; box-shadow: 0 1px 0 var(--border); }
 .data-table td { padding: .625rem .75rem; border-top: 1px solid var(--border); }
