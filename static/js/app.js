@@ -641,6 +641,33 @@ function exportSummaryPdf() {
 
 // ---------- Tabs & events ----------
 // ---------- Overall summary (selected business scope, selected date) ----------
+async function loadInactive() {
+  const body = $('inactiveBody');
+  const startDate = $('inactiveStartDate').value;
+  const days = Math.max(1, Number.parseInt($('inactiveDays').value, 10) || 2);
+  body.innerHTML = '<tr><td colspan="3" class="empty">Loading inactive employees…</td></tr>';
+  try {
+    const params = { n_days: String(days) };
+    if (startDate) params.start_date = startDate;
+    const inactiveByBranch = await api('/api/inactive', params);
+    $('inactiveHint').textContent = startDate
+      ? `Absent on ${days} archived dates from ${dmy(startDate)} onward.`
+      : `Absent on the latest ${days} archived dates.`;
+    const employees = Object.entries(inactiveByBranch).flatMap(([branch, rows]) =>
+      rows.map(row => ({
+        branch,
+        code: row['EMPLOYEE CODE'] || '',
+        name: row['EMPLOYEE NAME'] || ''
+      }))
+    ).sort((a, b) => a.branch.localeCompare(b.branch) || a.name.localeCompare(b.name));
+    body.innerHTML = employees.map(row => `<tr>
+      <td>${esc(row.branch)}</td><td>${esc(row.code)}</td><td class="name">${esc(row.name)}</td>
+    </tr>`).join('') || `<tr><td colspan="3" class="empty">No inactive employees found for ${days} archived dates.</td></tr>`;
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="3" class="empty">Error: ${esc(e.message || e)}</td></tr>`;
+  }
+}
+
 async function loadSummary() {
   const body = $('summaryBody');
   body.innerHTML = `<tr><td colspan="7" class="empty">Loading…</td></tr>`;
@@ -719,8 +746,9 @@ async function loadSummary() {
 }
 
 function showTab(t) {
-  ['daily', 'matrix', 'summary'].forEach(x => $(x).classList.toggle('hidden', x !== t));
+  ['daily', 'matrix', 'inactive', 'summary'].forEach(x => $(x).classList.toggle('hidden', x !== t));
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+  if (t === 'inactive') loadInactive();
   if (t === 'summary') loadSummary();
 }
 
@@ -753,6 +781,7 @@ on('businessName', 'onchange', () => {
   if (summaryOpen()) loadSummary();
 });
 on('refresh', 'onclick', async () => { await loadBranch(); if (summaryOpen()) loadSummary(); });
+on('inactiveUpdate', 'onclick', loadInactive);
 on('sync', 'onclick', syncSheet);
 on('exportPdf', 'onclick', exportBranchPdf);
 on('exportAll', 'onclick', exportAllPdf);

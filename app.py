@@ -73,8 +73,14 @@ def create_app():
     @app.route("/api/inactive", methods=["GET"])
     def inactive():
         try:
-            
-            return jsonify(INACTIVE.get_inactive())
+            inactive_data = INACTIVE.get_inactive(
+                start_date=request.args.get("start_date"),
+                n_days=request.args.get("n_days", default=2, type=int),
+            )
+            return jsonify({
+                branch: frame.to_dict(orient="records")
+                for branch, frame in inactive_data.items()
+            })
         except Exception as e:
             return jsonify({"error": str(e)})
 

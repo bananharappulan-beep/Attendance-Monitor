@@ -13,6 +13,7 @@ The full sync back-fills every date found in the source sheet.
 import json
 import logging
 import re
+import ssl
 import threading
 from calendar import monthrange
 from datetime import date, datetime, time, timedelta
@@ -183,6 +184,17 @@ def _sheets():
 
 # ---------- read the SOURCE sheet ----------
 def fetch_source():
+    """Fetch source rows, rebuilding the Google client once after a TLS failure."""
+    global _service
+    try:
+        return _fetch_source_once()
+    except ssl.SSLError:
+        log.warning("Google Sheets TLS connection failed; rebuilding client and retrying once")
+        _service = None
+        return _fetch_source_once()
+
+
+def _fetch_source_once():
     """-> {branch: [{d, code, name, inT, outT}, ...]}  (one request for all tabs)."""
     api = _sheets().spreadsheets()
     out = {}
@@ -466,16 +478,7 @@ def _resolve_employee_code(name, branch, source):
     return ""
 
 
-def get_saved_matrix(branch):
-    """Read one branch's saved status matrix from the OUTPUT spreadsheet."""
-    if not Config.OUTPUT_SHEET_ID:
-        raise RuntimeError("OUTPUT_SHEET_ID is empty.")
-    result = _sheets().spreadsheets().values().get(
-        spreadsheetId=Config.OUTPUT_SHEET_ID,
-        range=_quote(branch),
-        valueRenderOption="FORMATTED_VALUE",
-    ).execute()
-    values = result.get("values", [])
+def _parse_saved_matrix(branch, values, source):
     if not values:
         return {"dates": [], "rows": []}
 
@@ -490,7 +493,6 @@ def get_saved_matrix(branch):
         if parsed:
             date_columns.append((parsed.isoformat(), index))
 
-    source = _source()
     rows = []
     for row in values[1:]:
         name = _cell(row, name_column).strip()
@@ -507,3 +509,32 @@ def get_saved_matrix(branch):
         rows.append({"name": name, "code": code, "statuses": statuses})
 
     return {"dates": [d for d, _ in date_columns], "rows": rows}
+
+
+def get_saved_matrices(branches):
+    """Read multiple branch matrices from OUTPUT in one Sheets API request."""
+    if not Config.OUTPUT_SHEET_ID:
+        raise RuntimeError("OUTPUT_SHEET_ID is empty.")
+    branches = list(dict.fromkeys(branches))
+    if not branches:
+        return {}
+    result = _sheets().spreadsheets().values().batchGet(
+        spreadsheetId=Config.OUTPUT_SHEET_ID,
+        ranges=[_quote(branch) for branch in branches],
+        valueRenderOption="FORMATTED_VALUE",
+    ).execute()
+    source = _source()
+    value_ranges = result.get("valueRanges", [])
+    matrices = {
+        branch: _parse_saved_matrix(branch, value_range.get("values", []), source)
+        for branch, value_range in zip(branches, value_ranges)
+    }
+    return {
+        branch: matrices.get(branch, {"dates": [], "rows": []})
+        for branch in branches
+    }
+
+
+def get_saved_matrix(branch):
+    """Read one branch's saved status matrix from the OUTPUT spreadsheet."""
+    return get_saved_matrices([branch])[branch]
