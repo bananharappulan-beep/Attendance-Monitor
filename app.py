@@ -7,12 +7,15 @@ API
                                  (re-read source sheet + back-fill P/H/A matrix in the output sheet)
 
 Scheduler
-  * every day at ARCHIVE_HOUR:ARCHIVE_MINUTE (default 23:00, Asia/Kolkata):
-        today's P/H/A column is written into each branch worksheet
+    * every day at ARCHIVE_HOUR:ARCHIVE_MINUTE (default 04:00, Asia/Kolkata):
+                yesterday's P/H/A column is archived, then data_fetch.py refreshes source data
   * every SYNC_INTERVAL_MINUTES: dashboard cache refresh (does not write to the output sheet)
 """
 import logging
+import subprocess
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -49,6 +52,14 @@ def create_app():
         except Exception as e:
             return jsonify({"error": str(e)})
 
+    @app.get("/api/matrix")
+    def matrix():
+        branch = request.args.get("branch", "")
+        try:
+            return jsonify(sheets_sync.get_saved_matrix(branch))
+        except Exception as e:
+            return jsonify({"error": str(e)})
+
     @app.get("/api/sync")
     def sync_now():
         try:
@@ -64,18 +75,41 @@ def create_app():
 def start_scheduler():
     scheduler = BackgroundScheduler(daemon=True, timezone=Config.TIMEZONE)
 
-    # 1) Daily archive -> today's column in each branch worksheet
-    def archive_job():
+    # APScheduler runs this sequence on its background executor.
+    def daily_pipeline_job():
         try:
-            sheets_sync.archive_today()
+            log.info("Daily pipeline step 1/2: archive yesterday")
+            sheets_sync.archive_yesterday()
         except Exception:
-            log.exception("Daily archive failed")
+            log.exception("Daily archive failed; data fetch skipped")
+            return
+
+        try:
+            log.info("Daily pipeline step 2/2: fetch ESSL data")
+            result = subprocess.run(
+                [sys.executable, "-c", "import data_fetch; data_fetch.run()"],
+                cwd=str(Path(__file__).resolve().parent),
+                capture_output=True,
+                text=True,
+                timeout=3 * 60 * 60,
+            )
+            if result.stdout:
+                log.info("data_fetch output:\n%s", result.stdout[-3000:])
+            if result.returncode:
+                log.error("Data fetch failed (exit %s):\n%s",
+                          result.returncode, (result.stderr or "")[-3000:])
+            else:
+                log.info("Data fetch finished")
+        except subprocess.TimeoutExpired:
+            log.error("Data fetch timed out")
+        except Exception:
+            log.exception("Data fetch failed")
 
     scheduler.add_job(
-        archive_job,
+        daily_pipeline_job,
         CronTrigger(hour=Config.ARCHIVE_HOUR, minute=Config.ARCHIVE_MINUTE,
                     timezone=Config.TIMEZONE),
-        id="daily_archive",
+        id="daily_archive_and_fetch",
         max_instances=1,
         coalesce=True,
         misfire_grace_time=3600,   # still runs if the PC was busy/asleep up to 1 h late
@@ -99,7 +133,7 @@ def start_scheduler():
         )
 
     scheduler.start()
-    log.info("Daily archive scheduled for %02d:%02d (%s)",
+    log.info("Daily archive/fetch pipeline scheduled for %02d:%02d (%s)",
              Config.ARCHIVE_HOUR, Config.ARCHIVE_MINUTE, Config.TIMEZONE)
     return scheduler
 

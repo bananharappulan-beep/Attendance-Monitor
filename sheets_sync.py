@@ -6,16 +6,16 @@ OUTPUT sheet  (OUTPUT_SHEET_ID) : saved P/H/A matrix, one worksheet per branch, 
     EMPLOYEE NAME | 1/9/2026 | 2/9/2026 | ... | 30/9/2026
     BANA          | P        | A        |     |
 
-The header holds EVERY day of the month. At 11:00 PM each day only that day's column is
-filled in (archive_today). All other columns are kept exactly as they are.
-The manual "Sync Sheet" button back-fills every date found in the source sheet.
+The header holds EVERY day of the month. At 4:00 AM each day only the previous day's column is
+filled in (archive_yesterday). All other columns are kept exactly as they are.
+The full sync back-fills every date found in the source sheet.
 """
 import json
 import logging
 import re
 import threading
 from calendar import monthrange
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -367,10 +367,17 @@ def sync(only_dates=None):
 
 
 def archive_today():
-    """Runs at 11 PM: write ONLY today's column into every branch worksheet."""
+    """Write only today's column into every branch worksheet."""
     today = datetime.now(ZoneInfo(Config.TIMEZONE)).date().isoformat()
     log.info("Archiving %s", today)
     return sync(only_dates={today})
+
+
+def archive_yesterday():
+    """Write only yesterday's column into every branch worksheet."""
+    yesterday = datetime.now(ZoneInfo(Config.TIMEZONE)).date() - timedelta(days=1)
+    log.info("Archiving %s", yesterday.isoformat())
+    return sync(only_dates={yesterday.isoformat()})
 
 
 def refresh_cache():
@@ -394,3 +401,37 @@ def get_branches():
 
 def get_branch_data(branch):
     return [dict(r) for r in _source().get(branch, [])]
+
+
+def get_saved_matrix(branch):
+    """Read one branch's saved status matrix from the OUTPUT spreadsheet."""
+    if not Config.OUTPUT_SHEET_ID:
+        raise RuntimeError("OUTPUT_SHEET_ID is empty.")
+    result = _sheets().spreadsheets().values().get(
+        spreadsheetId=Config.OUTPUT_SHEET_ID,
+        range=_quote(branch),
+        valueRenderOption="FORMATTED_VALUE",
+    ).execute()
+    values = result.get("values", [])
+    if not values:
+        return {"dates": [], "rows": []}
+
+    date_columns = []
+    for index, value in enumerate(values[0][1:], start=1):
+        parsed = parse_date(str(value))
+        if parsed:
+            date_columns.append((parsed.isoformat(), index))
+
+    rows = []
+    for row in values[1:]:
+        name = _cell(row, 0).strip()
+        if not name:
+            continue
+        statuses = {}
+        for iso_date, index in date_columns:
+            value = _cell(row, index).strip().upper()
+            if value in ("P", "H", "A"):
+                statuses[iso_date] = value
+        rows.append({"name": name, "statuses": statuses})
+
+    return {"dates": [d for d, _ in date_columns], "rows": rows}

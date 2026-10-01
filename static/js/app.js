@@ -82,7 +82,7 @@ const CORE_OFFICE_SOURCE_ALIASES = {
 };
 const BUSINESS_ORDER = ['MAGNUS', 'ALIMS', 'M&D', 'MERCHX', 'HU', 'GRANDIS'];
 const BUSINESS_BRANCHES = {
-  MAGNUS: ['Manjeri', 'Kasargod', 'Kannur', 'Kuttivadi', 'Kozhikode', 'Tirur', 'Palakkad', 'Thrissur', 'Ernakulam', 'Alappuzha', 'Kottayam', 'Kollam', 'Trivandrum', 'Marthandam', 'Nagpur', 'Hyderabad', 'Bangalore'],
+  MAGNUS: ['Manjeri', 'Kasargod', 'Kannur', 'Kuttiyadi', 'Kozhikode', 'Tirur', 'Palakkad', 'Thrissur', 'Ernakulam', 'Alappuzha', 'Kottayam', 'Kollam', 'Trivandrum', 'Marthandam', 'Nagpur', 'Hyderabad', 'Bangalore'],
   ALIMS: ['Manjeri', 'Kozhikode', 'Ernakulam', 'Thrissur', 'Trivandrum'],
   'M&D': ['Manjeri', 'Ernakulam'],
   MERCHX: ['Manjeri', 'Kozhikode', 'Thrissur', 'Ernakulam'],
@@ -90,7 +90,7 @@ const BUSINESS_BRANCHES = {
   GRANDIS: ['Thoduppuzha', 'Chennai']
 };
 const BRANCH_SOURCE_ALIASES = {
-  'MAGNUS|Kuttivadi': 'KUTTIYADI',
+  'MAGNUS|Kuttiyadi': 'KUTTIYADI',
   'MERCHX|Manjeri': 'MERCHX MANJERI',
   'HU|Manjeri': 'HU MANJERI'
 };
@@ -98,7 +98,8 @@ function branchSourceName(business, branch) {
   return BRANCH_SOURCE_ALIASES[`${business}|${branch}`]
     || (business === 'MAGNUS' ? branch.toUpperCase() : `${business} ${branch}`.toUpperCase());
 }
-let rows = [];              // rows of the selected branch
+let rows = [];              // raw punch rows of the selected branch
+let savedMatrix = { dates: [], rows: [] };
 let byKey = new Map();      // "date|name" -> row
 let names = [];
 let availableBranches = [];
@@ -160,13 +161,12 @@ function renderMatrix() {
   const head = `<tr><th class="corner">EMP NAME</th>` +
     days.map(x => `<th>${dmy(x)}</th>`).join('') + `</tr>`;
 
-  const hasData = new Set(rows.map(r => r.d)); // dates that have any records in this branch
-  const body = names.map(n => {
+  const body = savedMatrix.rows.map(({ name, statuses }) => {
     const cells = days.map(x => {
-      if (!hasData.has(x)) return `<td></td>`;                     // no data yet for that date -> blank
-      return `<td>${pill(analyse(byKey.get(x + '|' + n)).st)}</td>`; // missing employee -> A
+      const value = statuses[x];
+      return value ? `<td>${pill(value)}</td>` : `<td></td>`;
     }).join('');
-    return `<tr><td class="emp">${esc(n)}</td>${cells}</tr>`;
+    return `<tr><td class="emp">${esc(name)}</td>${cells}</tr>`;
   }).join('');
 
   $('matrixTable').innerHTML = `<thead>${head}</thead><tbody>${body}</tbody>`;
@@ -186,7 +186,15 @@ async function loadBranch() {
   try {
     const selectedBranch = $('branch').selectedOptions[0];
     const sourceBranch = selectedBranch?.dataset.source || $('branch').value;
-    rows = await api('/api/data', { branch: sourceBranch });
+    const [branchRows, branchMatrix] = await Promise.all([
+      api('/api/data', { branch: sourceBranch }),
+      api('/api/matrix', { branch: sourceBranch }).catch(error => {
+        console.error('Saved matrix could not be loaded:', error);
+        return { dates: [], rows: [] };
+      })
+    ]);
+    rows = branchRows;
+    savedMatrix = branchMatrix;
     indexRows();
     const latest = rows.map(r => r.d).sort().pop();
     if (!$('date').value || !rows.some(r => r.d === $('date').value))

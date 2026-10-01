@@ -43,8 +43,9 @@ static/js/app.js
    ```
    python app.py
    ```
-   Open http://localhost:8080 . The first sync runs ~5 seconds after start, then every
-   `SYNC_INTERVAL_MINUTES`. Use the **Sync Sheet** button to run it immediately.
+   Open http://localhost:8080. The dashboard cache refreshes every `SYNC_INTERVAL_MINUTES`.
+   At 4:00 AM (`TIMEZONE`), a background job archives yesterday's attendance, then runs
+   `data_fetch.py` to fetch the next set of source data.
 
 Production: `gunicorn -w 1 -b 0.0.0.0:8080 app:app`
 (use a single worker so the background sync runs only once).

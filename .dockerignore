@@ -1,0 +1,25 @@
+# Secrets (never bake into the image)
+.env
+service-account.json
+*.json
+
+# Python junk
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Git and editor files
+.git
+.gitignore
+.vscode/
+
+# Files created by data_fetch.py
+report_*.csv
+error_*.png
+
+# Docs and other files not needed at runtime
+README.md
+LICENSE
+Dockerfile
+.dockerignore
