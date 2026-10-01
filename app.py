@@ -28,6 +28,7 @@ from config import Config
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("attendance")
 
+from inaactive import INACTIVE
 
 def create_app():
     app = Flask(__name__)
@@ -67,6 +68,14 @@ def create_app():
             return jsonify({"rows": rows, "branches": branches})
         except Exception as e:
             log.exception("Manual sync failed")
+            return jsonify({"error": str(e)})
+
+    @app.route("/api/inactive", methods=["GET"])
+    def inactive():
+        try:
+            
+            return jsonify(INACTIVE.get_inactive())
+        except Exception as e:
             return jsonify({"error": str(e)})
 
     return app
