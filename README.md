@@ -49,6 +49,9 @@ static/js/app.js
 
 Production: `gunicorn -w 1 -b 0.0.0.0:8080 app:app`
 (use a single worker so the background sync runs only once).
+On Render, add `GOOGLE_CREDENTIALS` as an environment secret containing the service-account
+JSON content. The Docker image intentionally excludes `service-account.json`; `data_fetch.py`
+accepts this secret directly (or `GOOGLE_CREDS` if configured separately).
 
 ## API
 | Route | Description |

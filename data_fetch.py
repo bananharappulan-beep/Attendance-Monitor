@@ -1,3 +1,4 @@
+import json
 import os
 import re
 from datetime import date, timedelta
@@ -19,11 +20,20 @@ HEADLESS = os.environ.get("HEADLESS", "1") == "1"
 
 SHEET_ID = os.environ["SHEET_ID"]
 
-GOOGLE_CREDS = os.environ.get("GOOGLE_CREDS", "service-account.json")
-if not os.path.isabs(GOOGLE_CREDS):
-    GOOGLE_CREDS = str(BASE_DIR / GOOGLE_CREDS)
-if not os.path.exists(GOOGLE_CREDS):
-    raise FileNotFoundError(f"Service account file not found: {GOOGLE_CREDS}")
+GOOGLE_CREDS = os.environ.get("GOOGLE_CREDS") or os.environ.get(
+    "GOOGLE_CREDENTIALS", "service-account.json"
+)
+GOOGLE_CREDS_INFO = None
+if GOOGLE_CREDS.lstrip().startswith("{"):
+    GOOGLE_CREDS_INFO = json.loads(GOOGLE_CREDS)
+else:
+    if not os.path.isabs(GOOGLE_CREDS):
+        GOOGLE_CREDS = str(BASE_DIR / GOOGLE_CREDS)
+    if not os.path.exists(GOOGLE_CREDS):
+        raise FileNotFoundError(
+            "Service-account credentials are missing. Set GOOGLE_CREDS or "
+            "GOOGLE_CREDENTIALS to the JSON content or path to a JSON file."
+        )
 
 # ESSL location name  ->  Google Sheet worksheet name
 LOCATION_MAP = {
@@ -139,8 +149,12 @@ def push_to_sheet(spreadsheet, tab_name, df):
     print(f"Sheet updated: {tab_name} ({len(df)} rows)")
 
 def run():
-    creds = Credentials.from_service_account_file(
-        GOOGLE_CREDS, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    creds = (
+        Credentials.from_service_account_info(GOOGLE_CREDS_INFO, scopes=scopes)
+        if GOOGLE_CREDS_INFO is not None
+        else Credentials.from_service_account_file(GOOGLE_CREDS, scopes=scopes)
+    )
     spreadsheet = gspread.authorize(creds).open_by_key(SHEET_ID)
 
     with sync_playwright() as p:
