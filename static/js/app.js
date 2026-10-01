@@ -764,6 +764,10 @@ async function loadSummary() {
 function showTab(t) {
   ['daily', 'matrix', 'inactive', 'summary'].forEach(x => $(x).classList.toggle('hidden', x !== t));
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+  $('exportPdf').classList.toggle('hidden', t !== 'daily');
+  $('exportAll').classList.toggle('hidden', t !== 'daily');
+  $('exportMatrixPdf').classList.toggle('hidden', t !== 'matrix');
+  $('exportSummaryPdf').classList.toggle('hidden', t !== 'summary');
   if (t === 'inactive') loadInactive();
   if (t === 'summary') loadSummary();
 }
