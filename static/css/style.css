@@ -111,9 +111,11 @@ select { min-width: 180px; }
 .matrix-table { border-collapse: collapse; font-size: .75rem; }
 .matrix-table th { position: sticky; top: 0; z-index: 10; background: var(--head); padding: .5rem; white-space: nowrap; }
 .matrix-table th.corner { left: 0; z-index: 20; text-align: left; padding: .5rem .75rem; }
+.matrix-table th.name-corner { position: sticky; left: 8rem; z-index: 20; text-align: left; padding: .5rem .75rem; }
 .matrix-table td { padding: .25rem; text-align: center; }
 .matrix-table tbody tr { border-top: 1px solid var(--border); }
-.matrix-table td.emp { position: sticky; left: 0; background: #fff; text-align: left; padding: .25rem .75rem; font-weight: 500; white-space: nowrap; }
+.matrix-table td.emp-code { position: sticky; left: 0; z-index: 2; width: 8rem; min-width: 8rem; max-width: 8rem; overflow: hidden; background: #fff; text-align: left; padding: .25rem .5rem; white-space: nowrap; text-overflow: ellipsis; }
+.matrix-table td.emp { position: sticky; left: 8rem; z-index: 1; background: #fff; text-align: left; padding: .25rem .75rem; font-weight: 500; white-space: nowrap; }
 
 /* status pills */
 .pill { display: inline-block; width: 1.75rem; text-align: center; border-radius: .25rem; font-weight: 600; }

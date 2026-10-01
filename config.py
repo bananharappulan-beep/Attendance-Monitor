@@ -32,8 +32,8 @@ class Config:
     SYNC_INTERVAL_MINUTES = float(_get("SYNC_INTERVAL_MINUTES", "5"))
 
     # Daily archive time (24h clock) and timezone
-    ARCHIVE_HOUR = int(_get("ARCHIVE_HOUR", "4"))
-    ARCHIVE_MINUTE = int(_get("ARCHIVE_MINUTE", "0"))
+    ARCHIVE_HOUR = int(_get("ARCHIVE_HOUR", "13"))
+    ARCHIVE_MINUTE = int(_get("ARCHIVE_MINUTE", "8"))
     TIMEZONE = _get("TIMEZONE", "Asia/Kolkata")
 
     CORS_ORIGINS = _get("CORS_ORIGINS", "*")

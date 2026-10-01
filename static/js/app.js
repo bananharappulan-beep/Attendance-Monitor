@@ -112,6 +112,34 @@ function indexRows() {
   names = [...new Set(rows.map(r => r.name))].sort((a, b) => a.localeCompare(b));
 }
 
+function addEmployeeCodes(matrix, sourceRows) {
+  const codeByName = new Map();
+  sourceRows.forEach(row => {
+    const name = String(row.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const code = String(row.code || '').trim();
+    if (name && code && !codeByName.has(name)) codeByName.set(name, code);
+  });
+
+  const uniqueRows = new Map();
+  (matrix.rows || []).forEach(row => {
+    const nameKey = String(row.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const code = row.code !== undefined
+      ? String(row.code || '').trim()
+      : codeByName.get(nameKey) || '';
+    const key = code ? `code:${code.toUpperCase()}` : `name:${String(row.name || '').trim().toUpperCase()}`;
+    const existing = uniqueRows.get(key);
+    if (!existing) {
+      uniqueRows.set(key, { ...row, code, statuses: { ...(row.statuses || {}) } });
+      return;
+    }
+    Object.entries(row.statuses || {}).forEach(([day, value]) => {
+      if (!existing.statuses[day]) existing.statuses[day] = value;
+    });
+  });
+
+  return { ...matrix, rows: [...uniqueRows.values()] };
+}
+
 function setMsg(text, isError = false) {
   const el = $('msg');
   el.textContent = text;
@@ -130,7 +158,7 @@ function renderDaily() {
     const a = analyse(byKey.get(d + '|' + n));
     cnt[a.st]++;
     const afterTwoPm = a.inM != null && a.inM > ABSENT_AFTER;
-    const late = a.inM != null && a.inM > LATE_AFTER ? fmtHM(a.inM - LATE_AFTER) : '';
+    const late = !afterTwoPm && a.inM != null && a.inM > LATE_AFTER ? fmtHM(a.inM - LATE_AFTER) : '';
     const early = a.outM != null && a.outM < EARLY_BEFORE ? fmtHM(EARLY_BEFORE - a.outM) : '';
     const out = a.outM != null
       ? fmt12(a.outM)
@@ -158,15 +186,15 @@ function renderMatrix() {
   for (let d = new Date(f + 'T00:00:00'); d <= new Date(t + 'T00:00:00') && days.length < 92; d.setDate(d.getDate() + 1))
     days.push(d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()));
 
-  const head = `<tr><th class="corner">EMP NAME</th>` +
+  const head = `<tr><th class="corner code-corner">EMP CODE</th><th class="name-corner">EMP NAME</th>` +
     days.map(x => `<th>${dmy(x)}</th>`).join('') + `</tr>`;
 
-  const body = savedMatrix.rows.map(({ name, statuses }) => {
+  const body = savedMatrix.rows.map(({ code, name, statuses }) => {
     const cells = days.map(x => {
       const value = statuses[x];
       return value ? `<td>${pill(value)}</td>` : `<td></td>`;
     }).join('');
-    return `<tr><td class="emp">${esc(name)}</td>${cells}</tr>`;
+    return `<tr><td class="emp-code">${esc(code)}</td><td class="emp">${esc(name)}</td>${cells}</tr>`;
   }).join('');
 
   $('matrixTable').innerHTML = `<thead>${head}</thead><tbody>${body}</tbody>`;
@@ -194,7 +222,7 @@ async function loadBranch() {
       })
     ]);
     rows = branchRows;
-    savedMatrix = branchMatrix;
+    savedMatrix = addEmployeeCodes(branchMatrix, branchRows);
     indexRows();
     const latest = rows.map(r => r.d).sort().pop();
     if (!$('date').value || !rows.some(r => r.d === $('date').value))

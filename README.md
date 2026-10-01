@@ -7,8 +7,8 @@ Python Flask backend + plain HTML / CSS / JavaScript front end. No database.
 * **Output sheet** (`OUTPUT_SHEET_ID`) - the saved status matrix, **one worksheet per branch**:
 
 ```
-EMP NAME | 27-09-2026 | 28-09-2026 | 29-09-2026 | 30-09-2026
-BANA     | A          | P          |            |
+EMP CODE | EMP NAME | 27-09-2026 | 28-09-2026 | 29-09-2026 | 30-09-2026
+M123     | BANA     | A          | P          |            |
 ```
 
 P = worked more than 5h, H = 4h through 5h inclusive, A = less than 4h, no record, or punch-in after 14:00.

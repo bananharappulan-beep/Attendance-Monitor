@@ -3,8 +3,8 @@
 SOURCE sheet  (SHEET_ID)        : raw punches, one tab per branch (read only)
 OUTPUT sheet  (OUTPUT_SHEET_ID) : saved P/H/A matrix, one worksheet per branch, e.g.
 
-    EMPLOYEE NAME | 1/9/2026 | 2/9/2026 | ... | 30/9/2026
-    BANA          | P        | A        |     |
+    EMPLOYEE CODE | EMPLOYEE NAME | 1/9/2026 | 2/9/2026 | ... | 30/9/2026
+    M123          | BANA          | P        | A        |     |
 
 The header holds EVERY day of the month. At 4:00 AM each day only the previous day's column is
 filled in (archive_yesterday). All other columns are kept exactly as they are.
@@ -28,6 +28,13 @@ log = logging.getLogger("attendance.sync")
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 HEADER = "EMPLOYEE NAME"
+CODE_HEADER = "EMPLOYEE CODE"
+OUTPUT_SKIP_TABS = frozenset({
+    "MAGNUS INSITUTE MANJERI",
+    "MAGNUS INSTITUTE OF TECHNOLOGY MARTHANDAM",
+    "MAGNUS INSTITUTE FCO MANJERI",
+    "MAGNUS GROUP MANJERI R&D",
+})
 PRESENT_MIN = 5 * 60 + 1  # > 5h -> P (durations are calculated to whole minutes)
 HALF_MIN = 4 * 60      # 4h through 5h -> H
 HALF_MAX = 5 * 60      # 5h inclusive (keep in sync with app.js)
@@ -99,6 +106,10 @@ def _branch_name(tab, company, core_office=False):
     if tab.casefold().startswith(business.casefold() + " "):
         return tab
     return f"{business.upper()} {tab.strip().upper()}".strip()
+
+
+def _employee_key(name):
+    return "".join(char for char in str(name or "").casefold() if char.isalnum())
 
 
 def _label(d):
@@ -237,29 +248,38 @@ def fetch_source():
 
 # ---------- build / merge the matrix ----------
 def parse_existing(values):
-    """Saved worksheet values -> ({name: {iso_date: 'P'|'H'|'A'}}, {dates found in header})."""
+    """Saved worksheet values -> ({name: {code, statuses}}, {dates found in header})."""
     if not values:
         return {}, set()
-    dates = [parse_date(str(c)) for c in values[0][1:]]
-    header_dates = {d for d in dates if d}
+    header = [str(cell).strip().upper() for cell in values[0]]
+    name_column = header.index(HEADER) if HEADER in header else 0
+    code_column = header.index(CODE_HEADER) if CODE_HEADER in header else -1
+    date_columns = [
+        (parse_date(str(cell)), index)
+        for index, cell in enumerate(values[0])
+        if index not in (name_column, code_column)
+    ]
+    header_dates = {day for day, _ in date_columns if day}
     saved = {}
     for row in values[1:]:
-        name = str(row[0]).strip() if row else ""
+        name = _cell(row, name_column).strip()
         if not name:
             continue
-        per_day = saved.setdefault(name, {})
-        for d, cell in zip(dates, row[1:]):
-            c = str(cell).strip().upper()
-            if d and c in ("P", "H", "A"):
-                per_day[d.isoformat()] = c
+        record = saved.setdefault(name, {"code": "", "statuses": {}})
+        if code_column >= 0 and not record["code"]:
+            record["code"] = _cell(row, code_column).strip()
+        for day, index in date_columns:
+            value = _cell(row, index).strip().upper()
+            if day and value in ("P", "H", "A"):
+                record["statuses"][day.isoformat()] = value
     return saved, header_dates
 
 
-def build_matrix(rows, saved, header_dates, only_dates=None):
+def build_matrix(rows, saved, header_dates, only_dates=None, branch=None, all_source=None):
     """rows = source rows of one branch, saved = already saved statuses,
     header_dates = dates already in the worksheet header.
 
-    Header = EMPLOYEE NAME + every day of every month involved.
+    Header = EMPLOYEE CODE + EMPLOYEE NAME + every day of every month involved.
     Only the dates in `only_dates` (None = all dates in the source) are (re)calculated;
     every other saved value is kept unchanged."""
     by_key = {(r["d"], r["name"]): r for r in rows}
@@ -267,7 +287,15 @@ def build_matrix(rows, saved, header_dates, only_dates=None):
     if only_dates is not None:
         src_dates &= set(only_dates)
     names = set(saved) | {r["name"] for r in rows}
-    status = {n: dict(saved.get(n, {})) for n in names}
+    status = {n: dict(saved.get(n, {}).get("statuses", {})) for n in names}
+    codes = {n: saved.get(n, {}).get("code", "") for n in names}
+    for row in rows:
+        if row.get("code") and not codes[row["name"]]:
+            codes[row["name"]] = str(row["code"]).strip()
+    if all_source is not None:
+        for name in names:
+            if not codes[name]:
+                codes[name] = _resolve_employee_code(name, branch or "", all_source)
     for d in src_dates:
         for n in names:                           # employee missing on a date with data -> A
             status[n][d] = status_for(by_key.get((d, n)))
@@ -278,8 +306,8 @@ def build_matrix(rows, saved, header_dates, only_dates=None):
     all_dates = [date(y, m, day) for y, m in sorted(months)
                  for day in range(1, monthrange(y, m)[1] + 1)]
 
-    header = [HEADER] + [_label(d) for d in all_dates]
-    body = [[n] + [status[n].get(d.isoformat(), "") for d in all_dates]
+    header = [CODE_HEADER, HEADER] + [_label(d) for d in all_dates]
+    body = [[codes[n], n] + [status[n].get(d.isoformat(), "") for d in all_dates]
             for n in sorted(names, key=str.casefold)]
     return [header] + body
 
@@ -302,6 +330,12 @@ def save_matrices(source, only_dates=None):
         spreadsheetId=out_id, fields="sheets.properties(sheetId,title,gridProperties)"
     ).execute()
     tabs = {s["properties"]["title"]: s["properties"] for s in meta.get("sheets", [])}
+    all_source = source
+    source = {branch: rows for branch, rows in source.items() if branch not in OUTPUT_SKIP_TABS}
+    requests = [
+        {"deleteSheet": {"sheetId": tabs[branch]["sheetId"]}}
+        for branch in OUTPUT_SKIP_TABS if branch in tabs
+    ]
 
     # what is already saved (one request)
     have = [b for b in source if b in tabs]
@@ -316,12 +350,14 @@ def save_matrices(source, only_dates=None):
             saved[b], headers[b] = parse_existing(vr.get("values", []))
 
     matrices = {
-        b: build_matrix(rows, saved.get(b, {}), headers.get(b, set()), only_dates)
+        b: build_matrix(
+            rows, saved.get(b, {}), headers.get(b, set()), only_dates,
+            branch=b, all_source=all_source,
+        )
         for b, rows in source.items()
     }
 
     # create missing worksheets / grow small ones (one request)
-    requests = []
     for b, m in matrices.items():
         need_r, need_c = max(len(m), 2), max(len(m[0]), 2)
         props = tabs.get(b)
@@ -403,6 +439,33 @@ def get_branch_data(branch):
     return [dict(r) for r in _source().get(branch, [])]
 
 
+def _resolve_employee_code(name, branch, source):
+    branch_key = _employee_key(branch)
+    exact_branch, related_branches = [], []
+    all_rows = []
+    for source_branch, source_rows in source.items():
+        entries = [(row.get("name", ""), str(row.get("code") or "").strip())
+                   for row in source_rows if row.get("code")]
+        all_rows.extend(entries)
+        if source_branch.casefold() == branch.casefold():
+            exact_branch.extend(entries)
+        elif _employee_key(source_branch).endswith(branch_key):
+            related_branches.extend(entries)
+
+    target = str(name or "").strip()
+    name_matchers = (
+        lambda candidate: candidate.strip() == target,
+        lambda candidate: candidate.strip().casefold() == target.casefold(),
+        lambda candidate: _employee_key(candidate) == _employee_key(target),
+    )
+    for candidates in (exact_branch, related_branches, all_rows):
+        for matches_name in name_matchers:
+            codes = {code for candidate, code in candidates if matches_name(candidate)}
+            if codes:
+                return next(iter(codes)) if len(codes) == 1 else ""
+    return ""
+
+
 def get_saved_matrix(branch):
     """Read one branch's saved status matrix from the OUTPUT spreadsheet."""
     if not Config.OUTPUT_SHEET_ID:
@@ -416,22 +479,31 @@ def get_saved_matrix(branch):
     if not values:
         return {"dates": [], "rows": []}
 
+    header = [str(cell).strip().upper() for cell in values[0]]
+    name_column = header.index(HEADER) if HEADER in header else 0
+    code_column = header.index(CODE_HEADER) if CODE_HEADER in header else -1
     date_columns = []
-    for index, value in enumerate(values[0][1:], start=1):
+    for index, value in enumerate(values[0]):
+        if index in (name_column, code_column):
+            continue
         parsed = parse_date(str(value))
         if parsed:
             date_columns.append((parsed.isoformat(), index))
 
+    source = _source()
     rows = []
     for row in values[1:]:
-        name = _cell(row, 0).strip()
+        name = _cell(row, name_column).strip()
         if not name:
             continue
+        code = _cell(row, code_column).strip() if code_column >= 0 else ""
+        if not code:
+            code = _resolve_employee_code(name, branch, source)
         statuses = {}
         for iso_date, index in date_columns:
             value = _cell(row, index).strip().upper()
             if value in ("P", "H", "A"):
                 statuses[iso_date] = value
-        rows.append({"name": name, "statuses": statuses})
+        rows.append({"name": name, "code": code, "statuses": statuses})
 
     return {"dates": [d for d, _ in date_columns], "rows": rows}
