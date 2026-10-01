@@ -94,6 +94,10 @@ const BRANCH_SOURCE_ALIASES = {
   'MERCHX|Manjeri': 'MERCHX MANJERI',
   'HU|Manjeri': 'HU MANJERI'
 };
+function branchSourceName(business, branch) {
+  return BRANCH_SOURCE_ALIASES[`${business}|${branch}`]
+    || (business === 'MAGNUS' ? branch.toUpperCase() : `${business} ${branch}`.toUpperCase());
+}
 let rows = [];              // rows of the selected branch
 let byKey = new Map();      // "date|name" -> row
 let names = [];
@@ -201,6 +205,7 @@ async function loadBranches() {
 
 async function updateBranchOptions() {
   const branchSelect = $('branch');
+  if ($('businessName').value === 'ALL' && $('locationType').value === 'ALL') return;
   const currentOption = branchSelect.selectedOptions[0];
   const currentBusiness = currentOption?.dataset.business;
   const currentBranch = currentOption?.dataset.branch;
@@ -217,7 +222,7 @@ async function updateBranchOptions() {
     }));
   } else {
     options = BUSINESS_BRANCHES[business].map(branch => {
-      const sourceName = BRANCH_SOURCE_ALIASES[`${business}|${branch}`] || branch.toUpperCase();
+      const sourceName = branchSourceName(business, branch);
       const source = availableBranches.find(name => name.toUpperCase() === sourceName.toUpperCase()) || sourceName;
       return {
         business, branch, source,
@@ -257,8 +262,8 @@ function updateLocationTypeOptions() {
 
   if (isAllBusiness) {
     $('locationTypeLabel').textContent = 'Business Type';
-    locationType.innerHTML = BUSINESS_ORDER.map(business =>
-      `<option value="${esc(business)}">${esc(business)}</option>`
+    locationType.innerHTML = [['ALL', 'ALL'], ...BUSINESS_ORDER.map(business => [business, business])].map(([value, label]) =>
+      `<option value="${esc(value)}">${esc(label)}</option>`
     ).join('');
     locationType.value = allBusinessType;
     locationType.dataset.mode = 'business-type';
@@ -358,6 +363,8 @@ async function pdfReady() {
       await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
     if (!(window.jspdf.jsPDF.API && window.jspdf.jsPDF.API.autoTable))
       await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
+    if (!window.html2canvas)
+      await loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');
     return true;
   } catch (e) {
     setMsg('PDF library could not be loaded (check internet / CDN access).', true);
@@ -392,27 +399,194 @@ async function exportAllPdf() {
   btn.disabled = false;
 }
 
+function applyStatusColorsForPdfCell(cell, theme = '') {
+  if (!cell || !cell.cell) return;
+  const value = String(cell.cell.raw ?? cell.cell.text ?? '').trim().toUpperCase();
+  const status = value === 'P' ? { bg: [220, 252, 231], fg: [22, 101, 52] }
+    : value === 'H' ? { bg: [254, 243, 199], fg: [146, 64, 14] }
+    : value === 'A' ? { bg: [254, 226, 226], fg: [153, 27, 27] }
+    : null;
+
+  if (status) {
+    cell.cell.styles.fillColor = status.bg;
+    cell.cell.styles.textColor = status.fg;
+    cell.cell.styles.fontStyle = 'bold';
+    cell.cell.styles.halign = 'center';
+    return;
+  }
+
+  if (theme !== 'summary' || !cell.column) return;
+  const summaryPalette = {
+    3: { bg: [220, 252, 231], fg: [22, 101, 52] },
+    4: { bg: [254, 243, 199], fg: [146, 64, 14] },
+    5: { bg: [254, 226, 226], fg: [153, 27, 27] }
+  };
+  const palette = summaryPalette[cell.column.index];
+  if (!palette) return;
+
+  if (cell.section === 'head') {
+    cell.cell.styles.fillColor = palette.bg;
+    cell.cell.styles.textColor = palette.fg;
+  } else {
+    cell.cell.styles.textColor = palette.fg;
+  }
+  cell.cell.styles.fontStyle = 'bold';
+  cell.cell.styles.halign = 'center';
+}
+
 async function exportTablePdf(tableId, title, filename, options = {}) {
   if (!(await pdfReady())) return;
   const table = $(tableId);
   if (!table || !table.querySelector('thead tr') || !table.querySelector('tbody tr') || table.querySelector('tbody .empty'))
     return setMsg('No data to export for this view.', true);
 
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: options.landscape ? 'landscape' : 'portrait' });
-  doc.setFontSize(16);
-  doc.text(title, 40, 40);
-  doc.autoTable({
-    html: table,
-    startY: 58,
-    margin: 32,
-    styles: { fontSize: options.landscape ? 7 : 8, cellPadding: 4 },
-    headStyles: { fillColor: [15, 23, 42] },
-    horizontalPageBreak: Boolean(options.landscape),
-    horizontalPageBreakRepeat: options.landscape ? [0] : undefined
-  });
-  doc.save(filename);
-  setMsg(`Exported ${filename}`);
+  try {
+    const { jsPDF } = window.jspdf;
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = `
+      background: #f8fafc;
+      width: 100%;
+      max-width: 1000px;
+      padding: 0;
+      margin: 0;
+      box-sizing: border-box;
+      font-family: 'Lora', Georgia, 'Times New Roman', serif;
+      color: #1e293b;
+    `;
+
+    const titleEl = document.createElement('div');
+    titleEl.textContent = title;
+    titleEl.style.cssText = `
+      font-family: 'Lora', Georgia, 'Times New Roman', serif;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      color: #1e293b;
+      margin: 0 0 10px 0;
+      line-height: 1.2;
+    `;
+
+    const tableClone = table.cloneNode(true);
+    tableClone.style.margin = '0';
+    tableClone.style.width = '100%';
+    tableClone.style.maxWidth = '100%';
+    tableClone.style.borderCollapse = 'collapse';
+    tableClone.style.borderSpacing = '0';
+    tableClone.style.display = 'table';
+    tableClone.style.background = '#f8fafc';
+    tableClone.style.fontFamily = `'Lora', Georgia, 'Times New Roman', serif`;
+    tableClone.style.color = '#1e293b';
+
+    const headerCells = tableClone.querySelectorAll('thead th');
+    headerCells.forEach((cell, idx) => {
+      cell.style.cssText = `
+        background: #0f172a;
+        color: #ffffff;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        text-align: center;
+        padding: 10px 12px;
+        border: 1px solid #dfe7ef;
+        line-height: 1.3;
+        font-family: 'Lora', Georgia, 'Times New Roman', serif;
+      `;
+      if (idx === 0 || idx === 1) cell.style.textAlign = 'left';
+      if (idx === 3) cell.style.background = '#dcfce7'; cell.style.color = '#166534';
+      if (idx === 4) cell.style.background = '#fef3c7'; cell.style.color = '#92400e';
+      if (idx === 5) cell.style.background = '#fee2e2'; cell.style.color = '#991b1b';
+    });
+
+    const rows = tableClone.querySelectorAll('tbody tr');
+    rows.forEach((row) => {
+      row.style.background = '#f3f6f8';
+      row.style.borderTop = '1px solid #dfe7ef';
+      const cells = row.querySelectorAll('td');
+      cells.forEach((cell, idx) => {
+        cell.style.cssText = `
+          padding: 8px 12px;
+          border-top: 1px solid #dfe7ef;
+          border-bottom: 1px solid #dfe7ef;
+          border-left: none;
+          border-right: none;
+          text-align: center;
+          font-family: 'Lora', Georgia, 'Times New Roman', serif;
+          color: #1e293b;
+          background: transparent;
+        `;
+        if (idx === 1) {
+          cell.style.textAlign = 'left';
+          cell.style.fontWeight = '500';
+        }
+      });
+
+      const label = row.cells[1]?.textContent?.trim() || '';
+      if (label.includes(':')) {
+        row.style.background = '#e8eef5';
+        row.style.fontWeight = '700';
+        row.cells[1].style.fontWeight = '700';
+      }
+    });
+
+    const valueCells = tableClone.querySelectorAll('tbody td:nth-child(4), tbody td:nth-child(5), tbody td:nth-child(6)');
+    valueCells.forEach((cell) => {
+      const value = (cell.textContent || '').trim();
+      if (value === '0') cell.style.color = '#dc2626';
+      const colIndex = Array.from(cell.parentElement.children).indexOf(cell) + 1;
+      if (colIndex === 4) {
+        cell.style.color = '#16a34a';
+        cell.style.fontWeight = '700';
+      }
+      if (colIndex === 5) {
+        cell.style.color = '#ca8a04';
+        cell.style.fontWeight = '700';
+      }
+      if (colIndex === 6) {
+        cell.style.color = '#dc2626';
+        cell.style.fontWeight = '700';
+      }
+    });
+
+    wrapper.appendChild(titleEl);
+    wrapper.appendChild(tableClone);
+
+    document.body.appendChild(wrapper);
+    wrapper.style.position = 'absolute';
+    wrapper.style.left = '-9999px';
+    wrapper.style.top = '0';
+
+    const canvas = await window.html2canvas(wrapper, {
+      backgroundColor: '#f8fafc',
+      scale: 2,
+      useCORS: true,
+      logging: false
+    });
+
+    document.body.removeChild(wrapper);
+
+    const imgData = canvas.toDataURL('image/png');
+    const pdf = new jsPDF({
+      unit: 'pt',
+      format: 'a4',
+      orientation: options.landscape ? 'landscape' : 'portrait'
+    });
+
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const marginX = 16;
+    const marginY = 12;
+    const availableWidth = pageWidth - (marginX * 2);
+    const availableHeight = pageHeight - (marginY * 2);
+    const ratio = Math.min(availableWidth / canvas.width, availableHeight / canvas.height);
+    const imgWidth = canvas.width * ratio;
+    const imgHeight = canvas.height * ratio;
+
+    pdf.addImage(imgData, 'PNG', marginX, marginY, imgWidth, imgHeight);
+    pdf.save(filename);
+    setMsg(`Exported ${filename}`);
+  } catch (e) {
+    setMsg('PDF export failed: ' + (e.message || e), true);
+    console.error(e);
+  }
 }
 
 function exportMatrixPdf() {
@@ -421,12 +595,12 @@ function exportMatrixPdf() {
   const range = from && to ? `${dmy(from)} - ${dmy(to)}` : '';
   const safeBranch = String(branch).replace(/[\\/:*?"<>|]/g, '_').trim();
   return exportTablePdf('matrixTable', `${branch} - Status Matrix${range ? ` (${range})` : ''}`,
-    `${safeBranch}-status-matrix.pdf`, { landscape: true });
+    `${safeBranch}-status-matrix.pdf`, { landscape: true, theme: 'matrix' });
 }
 
 function exportSummaryPdf() {
   const title = `Overall Summary${$('summaryHint').textContent ? ` - ${$('summaryHint').textContent}` : ''}`;
-  return exportTablePdf('summaryTable', title, 'overall-summary.pdf');
+  return exportTablePdf('summaryTable', title, 'overall-summary.pdf', { theme: 'summary' });
 }
 
 // ---------- Tabs & events ----------
@@ -435,18 +609,20 @@ async function loadSummary() {
   const body = $('summaryBody');
   body.innerHTML = `<tr><td colspan="7" class="empty">Loading…</td></tr>`;
   try {
-    const allBusinesses = $('businessName').value === 'ALL';
+    const businessNameAll = $('businessName').value === 'ALL';
     const selectedBusiness = $('businessName').value;
     const locationType = $('locationType').value;
-    const businesses = allBusinesses ? BUSINESS_ORDER : [selectedBusiness];
+    const selectedBusinessType = businessNameAll ? locationType : selectedBusiness;
+    const allBusinesses = businessNameAll && selectedBusinessType === 'ALL';
+    const businesses = allBusinesses ? BUSINESS_ORDER : [selectedBusinessType];
     const branches = await api('/api/branches');
     const all = await Promise.all(branches.map(async b => ({ branch: b, data: await api('/api/data', { branch: b }) })));
     const date = $('date').value || all.flatMap(x => x.data.map(r => r.d)).sort().pop() || '';
     const selectedScope = allBusinesses
       ? 'ALL BUSINESSES'
-      : selectedBusiness === 'MAGNUS'
-        ? `MAGNUS: ${locationType === 'core-office' ? 'CORE OFFICE' : 'BRANCH'}`
-        : selectedBusiness;
+      : selectedBusinessType === 'MAGNUS'
+        ? businessNameAll ? 'MAGNUS' : `MAGNUS: ${locationType === 'core-office' ? 'CORE OFFICE' : 'BRANCH'}`
+        : selectedBusinessType;
     $('summaryHint').textContent = date ? `Attendance summary for ${dmy(date)} (${selectedScope})` : '';
 
     // Uses the same analyse() as the Daily Report, so the two views can never disagree.
@@ -464,32 +640,25 @@ async function loadSummary() {
         branch, total: emp.length, work, present: cnt.P, absent: cnt.A, half: cnt.H
       }];
     })));
-    const mappedBranches = new Set();
     const groups = [];
     businesses.forEach(business => {
       const branchRows = (BUSINESS_BRANCHES[business] || []).map(branch => {
-        const source = BRANCH_SOURCE_ALIASES[`${business}|${branch}`] || branch.toUpperCase();
+        const source = branchSourceName(business, branch);
         return rowsByBranch.get(source.toUpperCase());
       }).filter(Boolean);
-      branchRows.forEach(row => mappedBranches.add(row.branch));
       const officeRows = business === 'MAGNUS'
         ? CORE_OFFICES[business].map(branch => rowsByBranch.get(CORE_OFFICE_SOURCE_ALIASES[branch].toUpperCase())).filter(Boolean)
         : [];
-      officeRows.forEach(row => mappedBranches.add(row.branch));
 
       if (business === 'MAGNUS') {
-        if (allBusinesses || locationType === 'branch')
+        if (businessNameAll || locationType === 'branch')
           groups.push({ label: 'MAGNUS: BRANCH', rows: branchRows });
-        if (allBusinesses || locationType === 'core-office')
+        if (businessNameAll || locationType === 'core-office')
           groups.push({ label: 'MAGNUS: CORE OFFICE', rows: officeRows });
       } else {
         groups.push({ label: business, rows: branchRows });
       }
     });
-    if (allBusinesses) {
-      const otherBranches = [...rowsByBranch.values()].filter(row => !mappedBranches.has(row.branch));
-      if (otherBranches.length) groups.push({ label: 'OTHER', rows: otherBranches });
-    }
     const visibleGroups = groups.filter(group => group.rows.length);
     const includedRows = [...new Map(visibleGroups.flatMap(group => group.rows).map(row => [row.branch, row])).values()];
     const tot = { total: 0, work: 0, present: 0, absent: 0, half: 0 };

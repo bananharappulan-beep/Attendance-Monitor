@@ -90,6 +90,17 @@ def _quote(tab):
     return "'" + tab.replace("'", "''") + "'"
 
 
+def _branch_name(tab, company, core_office=False):
+    if core_office:
+        return tab
+    business = re.sub(r"\s+", " ", (company or "").strip())
+    if not business or business.casefold() in {"magnus", "default"}:
+        return tab
+    if tab.casefold().startswith(business.casefold() + " "):
+        return tab
+    return f"{business.upper()} {tab.strip().upper()}".strip()
+
+
 def _label(d):
     """date -> '1/9/2026' (no zero padding, same as the backup file)."""
     return f"{d.day}/{d.month}/{d.year}"
@@ -168,6 +179,10 @@ def fetch_source():
         sheet_id for sheet_id in (Config.SHEET_ID, Config.CORE_OFFICE_SHEET_ID) if sheet_id
     )
     for sheet_id in source_ids:
+        is_core_office = (
+            sheet_id == Config.CORE_OFFICE_SHEET_ID
+            and sheet_id != Config.SHEET_ID
+        )
         meta = api.get(
             spreadsheetId=sheet_id, fields="sheets.properties.title"
         ).execute()
@@ -195,14 +210,16 @@ def fetch_source():
 
             i_date, i_code, i_name = idx("date"), idx("employee code"), idx("employee name")
             i_in, i_out = idx("in time"), idx("out time")
+            i_company = idx("company")
             i_duration = idx("duration") if idx("duration") >= 0 else 12
 
-            rows = out.setdefault(tab, {})
             for r in values[1:]:
                 name = _cell(r, i_name).strip()
                 d = parse_date(_cell(r, i_date))
                 if not name or d is None:
                     continue
+                branch = _branch_name(tab, _cell(r, i_company), is_core_office)
+                rows = out.setdefault(branch, {})
                 t_in, t_out = parse_time(_cell(r, i_in)), parse_time(_cell(r, i_out))
                 rows[(d.isoformat(), name)] = {
                     "d": d.isoformat(),
