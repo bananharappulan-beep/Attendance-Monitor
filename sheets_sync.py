@@ -6,9 +6,14 @@ OUTPUT sheet  (OUTPUT_SHEET_ID) : saved P/H/A matrix, one worksheet per branch, 
     EMPLOYEE NAME | 1/9/2026 | 2/9/2026 | ... | 30/9/2026
     BANA          | P        | A        |     |
 
-The header holds EVERY day of the month. At 11:00 PM each day only that day's column is
-filled in (archive_today). All other columns are kept exactly as they are.
-The manual "Sync Sheet" button back-fills every date found in the source sheet.
+The header holds EVERY day of the month.
+
+Automatic jobs (started from app.py):
+  * 04:00 daily   -> sync(): re-read the source, rebuild the cache and back-fill the
+                     P/H/A column for every date found in the source sheet.
+  * 16:00 daily   -> archive_today(): fill in only that day's column, then data_fetch runs.
+                     All other columns are kept exactly as they are.
+  * every N min   -> refresh_cache(): dashboard cache only, nothing is written to the output sheet.
 """
 import json
 import logging
@@ -33,7 +38,8 @@ HALF_MIN = 4 * 60      # 4h through 5h -> H
 HALF_MAX = 5 * 60      # 5h inclusive (keep in sync with app.js)
 ABSENT_AFTER = 14 * 60 # Punch-in after 2 PM -> A
 
-_lock = threading.RLock()
+_lock = threading.RLock()        # protects _cache and _service (held only briefly)
+_write_lock = threading.Lock()   # only one write to the output sheet at a time
 _service = None
 _cache = None          # {branch: [row, ...]} read from the source sheet
 
@@ -326,24 +332,29 @@ def save_matrices(source, only_dates=None):
     ).execute()
 
 
-# ---------- public API used by the Flask routes / scheduler ----------
+# ---------- public API used by the SyncWorker / pipeline ----------
 def sync(only_dates=None):
     """Read the source sheet, refresh the dashboard cache, save the matrices.
-    only_dates=None -> archive every date found in the source (manual 'Sync Sheet' back-fill).
-    Returns (rows_read, branches_saved)."""
+    only_dates=None -> back-fill every date found in the source (daily 04:00 full sync).
+    only_dates={...} -> recalculate just those dates (used by archive_today).
+    Returns (rows_read, branches_saved).
+
+    The slow Google calls run WITHOUT holding _lock, so dashboard requests
+    are never blocked while a sync is running."""
     global _cache
+    source = fetch_source()              # slow part, no lock held
     with _lock:
-        source = fetch_source()
         _cache = source
-        if source:
+    if source:
+        with _write_lock:                # never two writers at once
             save_matrices(source, only_dates)
-        rows = sum(len(v) for v in source.values())
-        log.info("Synced %d rows, %d branches", rows, len(source))
-        return rows, len(source)
+    rows = sum(len(v) for v in source.values())
+    log.info("Synced %d rows, %d branches", rows, len(source))
+    return rows, len(source)
 
 
 def archive_today():
-    """Runs at 11 PM: write ONLY today's column into every branch worksheet."""
+    """Runs at 4 PM (from the pipeline): write ONLY today's column into every branch worksheet."""
     today = datetime.now(ZoneInfo(Config.TIMEZONE)).date().isoformat()
     log.info("Archiving %s", today)
     return sync(only_dates={today})
@@ -352,16 +363,21 @@ def archive_today():
 def refresh_cache():
     """Frequent job: keeps the dashboard fresh without touching the output sheet."""
     global _cache
+    fresh = fetch_source()               # slow part, no lock held
     with _lock:
-        _cache = fetch_source()
+        _cache = fresh
 
 
 def _source():
     global _cache
     with _lock:
-        if _cache is None:
-            _cache = fetch_source()
-        return _cache
+        cached = _cache
+    if cached is None:
+        fresh = fetch_source()
+        with _lock:
+            _cache = fresh
+        cached = fresh
+    return cached
 
 
 def get_branches():

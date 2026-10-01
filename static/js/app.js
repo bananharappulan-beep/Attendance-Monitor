@@ -271,23 +271,6 @@ function updateLocationTypeOptions() {
   locationType.dataset.mode = 'location-type';
 }
 
-async function syncSheet() {
-  const btn = $('sync');
-  btn.disabled = true;
-  setMsg('Syncing from Google Sheet…');
-  try {
-    const r = await api('/api/sync');
-    const current = $('branch').value;
-    await loadBranches();
-    if (current && [...$('branch').options].some(o => o.value === current)) {
-      $('branch').value = current;
-      await loadBranch();
-    }
-    setMsg(`Synced ${r.rows} rows · matrix saved for ${r.branches} branch(es) in the output Google Sheet.`);
-  } catch (e) { setMsg('Sync error: ' + (e.message || e), true); }
-  btn.disabled = false;
-}
-
 // ---------- PDF export (Daily Report) ----------
 function dailyRowsFor(data, date) {
   const map = new Map(data.map(r => [r.d + '|' + r.name, r]));
@@ -422,7 +405,6 @@ function exportSummaryPdf() {
   return exportTablePdf('summaryTable', title, 'overall-summary.pdf');
 }
 
-// ---------- Tabs & events ----------
 // ---------- Overall summary (all branches, selected date) ----------
 async function loadSummary() {
   const body = $('summaryBody');
@@ -462,6 +444,7 @@ async function loadSummary() {
   }
 }
 
+// ---------- Tabs & events ----------
 function showTab(t) {
   ['daily', 'matrix', 'summary'].forEach(x => $(x).classList.toggle('hidden', x !== t));
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
@@ -492,7 +475,6 @@ on('locationType', 'onchange', () => {
 });
 on('businessName', 'onchange', () => { updateLocationTypeOptions(); updateBranchOptions(); });
 on('refresh', 'onclick', async () => { await loadBranch(); if (summaryOpen()) loadSummary(); });
-on('sync', 'onclick', syncSheet);
 on('exportPdf', 'onclick', exportBranchPdf);
 on('exportAll', 'onclick', exportAllPdf);
 on('exportMatrixPdf', 'onclick', exportMatrixPdf);
