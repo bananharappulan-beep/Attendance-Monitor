@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 from datetime import date, timedelta
@@ -9,6 +10,9 @@ import gspread
 from dotenv import load_dotenv
 from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("attendance.data_fetch")
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
@@ -99,6 +103,41 @@ def select_location(frame, loc):
     raise RuntimeError(f"Location '{loc}' not found in ESSL dropdown")
 
 
+def _login_error_details(page):
+    try:
+        title = page.title()
+    except Exception:
+        title = "unavailable"
+
+    try:
+        body_text = page.locator("body").inner_text(timeout=5000)
+    except Exception:
+        body_text = ""
+
+    error_lines = []
+    for line in body_text.splitlines():
+        line = line.strip()
+        if not line or not re.search(
+            r"\b(error|invalid|incorrect|failed|failure|session|password|username|login)\b",
+            line,
+            flags=re.IGNORECASE,
+        ):
+            continue
+        for secret in (USER, PASS):
+            if len(secret) >= 3:
+                line = re.sub(re.escape(secret), "[redacted]", line, flags=re.IGNORECASE)
+        error_lines.append(line[:300])
+        if len(error_lines) == 5:
+            break
+
+    details = [f"URL: {page.url}", f"Title: {title}"]
+    if error_lines:
+        details.append("Visible error text: " + " | ".join(error_lines))
+    else:
+        details.append("No visible error text was found.")
+    return "; ".join(details)
+
+
 def download_for_location(page, loc, path):
     frame = open_report_form(page)
 
@@ -169,10 +208,17 @@ def run():
             page.click("[name='StaffloginDialog$Btn_Ok']")
             page.wait_for_load_state("networkidle")
             page.wait_for_timeout(2000)
-            if "CustomError" in page.url:
-                raise RuntimeError("Login failed or session rejected")
+            login_form = page.locator(
+                "input[name='StaffloginDialog$txt_LoginName']"
+            )
+            if "CustomError" in page.url or login_form.is_visible():
+                raise RuntimeError(
+                    "ESSL login failed or the session was rejected. "
+                    + _login_error_details(page)
+                )
             print("Login done. Page:", page.url)
 
+            failed_locations = []
             for essl_loc, sheet_tab in LOCATION_MAP.items():
                 safe = re.sub(r"[^A-Za-z0-9]+", "_", essl_loc)
                 path = BASE_DIR / f"report_{safe}.csv"
@@ -181,11 +227,16 @@ def run():
                     df = pd.read_csv(path)
                     print(f"{essl_loc} -> {sheet_tab}: {len(df)} rows for {report_day}")
                     push_to_sheet(spreadsheet, sheet_tab, df)
-                except Exception as e:
-                    print(f"FAILED for {essl_loc}:", str(e)[:300])
-                    page.screenshot(path=str(BASE_DIR / f"error_{safe}.png"), full_page=True)
+                except Exception:
+                    failed_locations.append(essl_loc)
+                    log.exception("Failed to fetch or upload ESSL report for %s", essl_loc)
                 finally:
                     path.unlink(missing_ok=True)
                     print("CSV removed:", path.name)
+            if failed_locations:
+                raise RuntimeError(
+                    "ESSL data fetch failed for locations: "
+                    + ", ".join(failed_locations)
+                )
         finally:
             browser.close()

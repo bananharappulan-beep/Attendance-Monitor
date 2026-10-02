@@ -10,24 +10,18 @@ The header holds EVERY day of the month. At 4:00 AM each day only the previous d
 filled in (archive_yesterday). All other columns are kept exactly as they are.
 The full sync back-fills every date found in the source sheet.
 """
-import json
 import logging
 import re
-import ssl
 import threading
 from calendar import monthrange
 from datetime import date, datetime, time, timedelta
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-
 from config import Config
+from sheets_client import SHEETS_LOCK, get_client, with_retry
 
 log = logging.getLogger("attendance.sync")
 
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 HEADER = "EMPLOYEE NAME"
 CODE_HEADER = "EMPLOYEE CODE"
 OUTPUT_SKIP_TABS = frozenset({
@@ -41,8 +35,8 @@ HALF_MIN = 4 * 60      # 4h through 5h -> H
 HALF_MAX = 5 * 60      # 5h inclusive (keep in sync with app.js)
 ABSENT_AFTER = 14 * 60 # Punch-in after 2 PM -> A
 
-_lock = threading.RLock()
-_service = None
+_sync_lock = threading.RLock()
+_cache_lock = threading.RLock()
 _cache = None          # {branch: [row, ...]} read from the source sheet
 
 HM = re.compile(r"(\d{1,2}):(\d{2})")
@@ -157,46 +151,20 @@ def status_for(row):
     return "P" if work >= PRESENT_MIN else "H" if HALF_MIN <= work <= HALF_MAX else "A"
 
 
-# ---------- Google API ----------
-def _credentials():
-    raw = Config.GOOGLE_CREDENTIALS.strip()
-    if not raw:
-        raise RuntimeError("GOOGLE_CREDENTIALS is empty. Set it to a local JSON path or the raw JSON content.")
-
-    if raw.startswith("{"):
-        info = json.loads(raw)
-        return service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
-
-    path = Path(raw)
-    if not path.is_absolute():
-        path = (Path(__file__).resolve().parent / path).resolve()
-    if not path.exists():
-        raise FileNotFoundError(f"Google service account file not found: {path}")
-    return service_account.Credentials.from_service_account_file(str(path), scopes=SCOPES)
-
-
-def _sheets():
-    global _service
-    if _service is None:
-        _service = build("sheets", "v4", credentials=_credentials(), cache_discovery=False)
-    return _service
+def _sheets_call(operation):
+    """Run one gspread operation under the shared lock with transient retries."""
+    with SHEETS_LOCK:
+        return with_retry(lambda: operation(get_client()))
 
 
 # ---------- read the SOURCE sheet ----------
 def fetch_source():
-    """Fetch source rows, rebuilding the Google client once after a TLS failure."""
-    global _service
-    try:
-        return _fetch_source_once()
-    except ssl.SSLError:
-        log.warning("Google Sheets TLS connection failed; rebuilding client and retrying once")
-        _service = None
-        return _fetch_source_once()
+    """Fetch source rows, retrying transient failures and rebuilding after TLS errors."""
+    return _fetch_source_once()
 
 
 def _fetch_source_once():
     """-> {branch: [{d, code, name, inT, outT}, ...]}  (one request for all tabs)."""
-    api = _sheets().spreadsheets()
     out = {}
     source_ids = dict.fromkeys(
         sheet_id for sheet_id in (Config.SHEET_ID, Config.CORE_OFFICE_SHEET_ID) if sheet_id
@@ -206,9 +174,11 @@ def _fetch_source_once():
             sheet_id == Config.CORE_OFFICE_SHEET_ID
             and sheet_id != Config.SHEET_ID
         )
-        meta = api.get(
-            spreadsheetId=sheet_id, fields="sheets.properties.title"
-        ).execute()
+        meta = _sheets_call(
+            lambda client: client.open_by_key(sheet_id).fetch_sheet_metadata(
+                params={"fields": "sheets.properties.title"}
+            )
+        )
         tabs = [
             s["properties"]["title"]
             for s in meta.get("sheets", [])
@@ -216,11 +186,12 @@ def _fetch_source_once():
         ]
         if not tabs:
             continue
-        res = api.values().batchGet(
-            spreadsheetId=sheet_id,
-            ranges=[_quote(t) for t in tabs],
-            valueRenderOption="FORMATTED_VALUE",
-        ).execute()
+        res = _sheets_call(
+            lambda client: client.open_by_key(sheet_id).values_batch_get(
+                ranges=[_quote(tab) for tab in tabs],
+                params={"valueRenderOption": "FORMATTED_VALUE"},
+            )
+        )
 
         for tab, vr in zip(tabs, res.get("valueRanges", [])):
             values = vr.get("values", [])
@@ -337,10 +308,11 @@ def save_matrices(source, only_dates=None):
     if out_id == Config.SHEET_ID:
         raise RuntimeError("OUTPUT_SHEET_ID must be a different sheet from SHEET_ID.")
 
-    api = _sheets().spreadsheets()
-    meta = api.get(
-        spreadsheetId=out_id, fields="sheets.properties(sheetId,title,gridProperties)"
-    ).execute()
+    meta = _sheets_call(
+        lambda client: client.open_by_key(out_id).fetch_sheet_metadata(
+            params={"fields": "sheets.properties(sheetId,title,gridProperties)"}
+        )
+    )
     tabs = {s["properties"]["title"]: s["properties"] for s in meta.get("sheets", [])}
     all_source = source
     source = {branch: rows for branch, rows in source.items() if branch not in OUTPUT_SKIP_TABS}
@@ -353,11 +325,12 @@ def save_matrices(source, only_dates=None):
     have = [b for b in source if b in tabs]
     saved, headers = {}, {}
     if have:
-        res = api.values().batchGet(
-            spreadsheetId=out_id,
-            ranges=[_quote(b) for b in have],
-            valueRenderOption="FORMATTED_VALUE",
-        ).execute()
+        res = _sheets_call(
+            lambda client: client.open_by_key(out_id).values_batch_get(
+                ranges=[_quote(branch) for branch in have],
+                params={"valueRenderOption": "FORMATTED_VALUE"},
+            )
+        )
         for b, vr in zip(have, res.get("valueRanges", [])):
             saved[b], headers[b] = parse_existing(vr.get("values", []))
 
@@ -388,14 +361,22 @@ def save_matrices(source, only_dates=None):
                                                       "columnCount": max(cc, need_c)}},
                     "fields": "gridProperties(rowCount,columnCount)"}})
     if requests:
-        api.batchUpdate(spreadsheetId=out_id, body={"requests": requests}).execute()
+        body = {"requests": requests}
+        _sheets_call(
+            lambda client: client.open_by_key(out_id).batch_update(body=body)
+        )
 
     # write everything (one request). RAW keeps '28/9/2026' as plain text.
-    api.values().batchUpdate(
-        spreadsheetId=out_id,
-        body={"valueInputOption": "RAW",
-              "data": [{"range": _quote(b) + "!A1", "values": m} for b, m in matrices.items()]},
-    ).execute()
+    body = {
+        "valueInputOption": "RAW",
+        "data": [
+            {"range": _quote(branch) + "!A1", "values": matrix}
+            for branch, matrix in matrices.items()
+        ],
+    }
+    _sheets_call(
+        lambda client: client.open_by_key(out_id).values_batch_update(body=body)
+    )
 
 
 # ---------- public API used by the Flask routes / scheduler ----------
@@ -404,9 +385,10 @@ def sync(only_dates=None):
     only_dates=None -> archive every date found in the source (manual 'Sync Sheet' back-fill).
     Returns (rows_read, branches_saved)."""
     global _cache
-    with _lock:
+    with _sync_lock:
         source = fetch_source()
-        _cache = source
+        with _cache_lock:
+            _cache = source
         if source:
             save_matrices(source, only_dates)
         rows = sum(len(v) for v in source.values())
@@ -431,13 +413,14 @@ def archive_yesterday():
 def refresh_cache():
     """Frequent job: keeps the dashboard fresh without touching the output sheet."""
     global _cache
-    with _lock:
-        _cache = fetch_source()
+    source = fetch_source()
+    with _cache_lock:
+        _cache = source
 
 
 def _source():
     global _cache
-    with _lock:
+    with _cache_lock:
         if _cache is None:
             _cache = fetch_source()
         return _cache
@@ -518,11 +501,12 @@ def get_saved_matrices(branches):
     branches = list(dict.fromkeys(branches))
     if not branches:
         return {}
-    result = _sheets().spreadsheets().values().batchGet(
-        spreadsheetId=Config.OUTPUT_SHEET_ID,
-        ranges=[_quote(branch) for branch in branches],
-        valueRenderOption="FORMATTED_VALUE",
-    ).execute()
+    result = _sheets_call(
+        lambda client: client.open_by_key(Config.OUTPUT_SHEET_ID).values_batch_get(
+            ranges=[_quote(branch) for branch in branches],
+            params={"valueRenderOption": "FORMATTED_VALUE"},
+        )
+    )
     source = _source()
     value_ranges = result.get("valueRanges", [])
     matrices = {

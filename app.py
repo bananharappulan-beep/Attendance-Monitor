@@ -82,7 +82,8 @@ def create_app():
                 for branch, frame in inactive_data.items()
             })
         except Exception as e:
-            return jsonify({"error": str(e)})
+            log.exception("Inactive fetch failed")
+            return jsonify({"error": str(e)}), 500
 
     return app
 
@@ -158,4 +159,4 @@ start_scheduler()
 
 if __name__ == "__main__":
     # use_reloader=False so the scheduler is not started twice
-    app.run(host="0.0.0.0", port=Config.PORT, debug=True, use_reloader=True)
+    app.run(host="0.0.0.0", port=Config.PORT, debug=True, use_reloader=False)

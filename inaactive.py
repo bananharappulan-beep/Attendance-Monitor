@@ -1,5 +1,9 @@
+import logging
+
 import sheets_sync
 import pandas as pd
+
+log = logging.getLogger("attendance.inactive")
 
 
 class METRIX:
@@ -37,7 +41,11 @@ class INACTIVE:
             raise ValueError(f"Invalid start_date: {start_date!r}")
 
         inactive_data = {}
-        metrix_df = METRIX.get_metrix_dataframe()
+        try:
+            metrix_df = METRIX.get_metrix_dataframe()
+        except Exception:
+            log.exception("Failed to load saved attendance matrices for inactive report")
+            raise
 
         for branch, data in metrix_df.items():
             date_columns = [
@@ -71,7 +79,6 @@ class INACTIVE:
         return inactive_data
 
         
-
 
 
 
