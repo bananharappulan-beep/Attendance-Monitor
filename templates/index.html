@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Attendance Monitor</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='5') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css', v='3') }}">
 </head>
 <body>
@@ -44,7 +44,15 @@
     </div>
   </header>
 
-  <div id="msg" class="msg"></div>
+  <div class="status-search-row">
+    <div id="msg" class="msg"></div>
+    <div id="employeeSearchRow" class="employee-search-row">
+      <div class="employee-search">
+        <svg class="employee-search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg>
+        <input id="employeeSearch" type="search" placeholder="Search code or name" aria-label="Search employee code or name" autocomplete="off">
+      </div>
+    </div>
+  </div>
 
   <div class="app-layout">
     <aside class="sidebar">
@@ -132,6 +140,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="{{ url_for('static', filename='js/auth-ui.js', v='4') }}"></script>
-<script src="{{ url_for('static', filename='js/app.js', v='4') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='7') }}"></script>
 </body>
 </html>

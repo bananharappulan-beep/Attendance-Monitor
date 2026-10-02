@@ -39,6 +39,7 @@ window.addEventListener('load', async () => {
     });
   }
 
+  $('employeeSearch').addEventListener('input', filterVisibleRows);
   updateLocationTypeOptions();
   const firstTab = ['daily', 'matrix', 'inactive', 'summary'].find(tab => permissions.tabs.includes(tab)) || 'daily';
   showTab(firstTab);
@@ -275,6 +276,7 @@ function renderDaily() {
 
   $('cards').innerHTML = [['P', 'Present'], ['H', 'Half-day'], ['A', 'Absent']].map(([k, l]) =>
     `<div class="card"><div class="label">${l}</div><div class="value">${cnt[k]}</div></div>`).join('');
+  filterVisibleRows();
 }
 
 // ---------- Matrix ----------
@@ -298,6 +300,34 @@ function renderMatrix() {
   }).join('');
 
   $('matrixTable').innerHTML = `<thead>${head}</thead><tbody>${body}</tbody>`;
+  filterVisibleRows();
+}
+
+function filterVisibleRows() {
+  const query = $('employeeSearch')?.value.trim().toLocaleLowerCase() || '';
+  const activeView = ['daily', 'matrix', 'inactive', 'summary']
+    .find(id => !$(`${id}`).classList.contains('hidden'));
+  if (!activeView || activeView === 'summary') return;
+  const table = document.querySelector(`#${activeView} table`);
+  if (!table) return;
+  const columns = { daily: [1], matrix: [0, 1], inactive: [0, 1], summary: [1] }[activeView];
+  table.querySelectorAll('tbody tr').forEach(row => {
+    if (row.querySelector('.empty')) {
+      row.classList.remove('hidden');
+      return;
+    }
+    const searchableText = columns.map(index => row.cells[index]?.textContent || '').join(' ').toLocaleLowerCase();
+    row.classList.toggle('hidden', Boolean(query) && !searchableText.includes(query));
+  });
+  if (activeView === 'daily') {
+    const counts = { P: 0, H: 0, A: 0 };
+    table.querySelectorAll('tbody tr:not(.hidden)').forEach(row => {
+      const status = row.cells[7]?.textContent.trim();
+      if (status in counts) counts[status]++;
+    });
+    $('cards').innerHTML = [['P', 'Present'], ['H', 'Half-day'], ['A', 'Absent']].map(([key, label]) =>
+      `<div class="card"><div class="label">${label}</div><div class="value">${counts[key]}</div></div>`).join('');
+  }
 }
 
 function setMonthRange() {
@@ -1659,6 +1689,7 @@ async function loadInactive() {
     body.innerHTML = employees.map(row => `<tr>
       <td>${esc(row.code)}</td><td class="name">${esc(row.name)}</td>
     </tr>`).join('') || `<tr><td colspan="2" class="empty">No inactive employees found for ${days} archived dates.</td></tr>`;
+    filterVisibleRows();
   } catch (e) {
     body.innerHTML = `<tr><td colspan="2" class="empty">Error: ${esc(e.message || e)}</td></tr>`;
   }
@@ -1736,6 +1767,7 @@ async function loadSummary() {
       html += `<tr class="total-row"><td></td><td>TOTAL</td>
         <td>${tot.total}</td><td>${tot.present}</td><td>${tot.half}</td><td>${tot.absent}</td><td>${fmtHM(tot.work)}</td></tr>`;
     body.innerHTML = html || `<tr><td colspan="7" class="empty">No data</td></tr>`;
+    filterVisibleRows();
   } catch (e) {
     body.innerHTML = `<tr><td colspan="7" class="empty">Error: ${esc(e.message || e)}</td></tr>`;
   }
@@ -1772,6 +1804,7 @@ function applyRole(me) {
 function showTab(t) {
   if (ME && !ME.permissions.tabs.includes(t)) return;
   ['daily', 'matrix', 'inactive', 'summary'].forEach(x => $(x).classList.toggle('hidden', x !== t));
+  $('employeeSearchRow').classList.toggle('hidden', t === 'summary');
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
   $('exportPdf').classList.toggle('hidden', t !== 'daily');
   $('exportAll').classList.toggle('hidden', t !== 'daily');
@@ -1780,6 +1813,7 @@ function showTab(t) {
   $('exportSummaryPdf').classList.toggle('hidden', t !== 'summary');
   if (t === 'inactive') loadInactive();
   if (t === 'summary') loadSummary();
+  filterVisibleRows();
 }
 
 const on = (id, ev, fn) => { const el = $(id); if (el) el[ev] = fn; };   // never let a missing element break the page
@@ -2126,6 +2160,7 @@ async function loadSummary() {
 
 function showTab(t) {
   ['daily', 'matrix', 'inactive', 'summary'].forEach(x => $(x).classList.toggle('hidden', x !== t));
+  $('employeeSearchRow').classList.toggle('hidden', t === 'summary');
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
   $('exportPdf').classList.toggle('hidden', t !== 'daily');
   $('exportAll').classList.toggle('hidden', t !== 'daily');
@@ -2134,6 +2169,7 @@ function showTab(t) {
   $('exportSummaryPdf').classList.toggle('hidden', t !== 'summary');
   if (t === 'inactive') loadInactive();
   if (t === 'summary') loadSummary();
+  filterVisibleRows();
 }
 
 const on = (id, ev, fn) => { const el = $(id); if (el) el[ev] = fn; };   // never let a missing element break the page
