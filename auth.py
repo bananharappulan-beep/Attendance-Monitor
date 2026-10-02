@@ -28,7 +28,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 log = logging.getLogger("attendance.auth")
 
 BASE_DIR = Path(__file__).resolve().parent
-USERS_FILE = Path(os.getenv("USERS_FILE") or (BASE_DIR / "users.json"))
+USERS_FILE = BASE_DIR / "users.json"
 SECRET_FILE = BASE_DIR / ".secret_key"
 
 ROLES = ("developer", "admin", "business")
@@ -76,7 +76,7 @@ _DUMMY_HASH = _hash("not-a-real-password")           # equalises timing for unkn
 # ---------------------------------------------------------------- JSON store
 def _read():
     if not USERS_FILE.exists():
-        return {"users": {}}
+        raise FileNotFoundError(f"User store not found: {USERS_FILE}")
     with USERS_FILE.open("r", encoding="utf-8") as f:
         data = json.load(f)
     data.setdefault("users", {})
@@ -143,31 +143,17 @@ def _active_developers(users, excluding=None):
             if u["role"] == "developer" and u.get("active", True) and n != excluding]
 
 
-def ensure_bootstrap():
-    """First run: create the 'developer' account (password from DEVELOPER_PASSWORD or random)."""
+def ensure_user_store():
+    """Validate the existing user store without creating or modifying it."""
+    if not USERS_FILE.is_file():
+        raise FileNotFoundError(f"User store not found: {USERS_FILE}")
     with _lock:
         data = _read()
-        if _active_developers(data["users"]):
-            return
-        password = os.getenv("DEVELOPER_PASSWORD", "").strip()
-        generated = not password
-        if generated:
-            password = secrets.token_urlsafe(9) + "7a"
-        data["users"]["developer"] = {
-            "username": "developer", "display_name": "Developer", "role": "developer",
-            "business": "", "permissions": _normalize_permissions("developer", None),
-            "password_hash": _hash(password), "active": True, "must_change_password": True,
-            "pw_changed": _now(), "created_at": _now(), "updated_at": _now(),
-        }
-        _write(data)
-        if generated:
-            log.warning("=" * 60)
-            log.warning("FIRST RUN: developer account created.")
-            log.warning("  username: developer   password: %s", password)
-            log.warning("  (you must change it at first login)")
-            log.warning("=" * 60)
-        else:
-            log.warning("FIRST RUN: developer account created from DEVELOPER_PASSWORD.")
+        users = data.get("users")
+        if not isinstance(users, dict) or not users:
+            raise ValueError(f"User store contains no accounts: {USERS_FILE}")
+        if not any(user.get("active", True) for user in users.values()):
+            raise ValueError(f"User store contains no active accounts: {USERS_FILE}")
 
 
 # ---------------------------------------------------------------- session / guards
@@ -508,7 +494,7 @@ def init_app(app):
         PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.getenv("SESSION_HOURS", "12"))),
     )
     app.register_blueprint(bp)
-    ensure_bootstrap()
+    ensure_user_store()
 
     @app.after_request
     def _no_store(resp):
