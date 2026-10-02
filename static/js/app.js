@@ -105,6 +105,13 @@ function analyse(r) {
   return { inM, outM, work, st };
 }
 
+function employeeIdentity(row) {
+  const code = String(row.code || '').trim();
+  return code
+    ? `code:${code.toUpperCase()}`
+    : `name:${String(row.name || '').trim().toUpperCase()}`;
+}
+
 const pill = s => `<span class="pill ${s}">${s}</span>`;
 
 // ---------- API ----------
@@ -193,8 +200,16 @@ let selectedLocationType = 'branch';
 
 function indexRows() {
   byKey = new Map();
-  rows.forEach(r => byKey.set(r.d + '|' + r.name, r));
-  names = [...new Set(rows.map(r => r.name))].sort((a, b) => a.localeCompare(b));
+  const employees = new Map();
+  rows.forEach(row => {
+    const identity = employeeIdentity(row);
+    byKey.set(row.d + '|' + identity, row);
+    if (!employees.has(identity))
+      employees.set(identity, { key: identity, name: row.name, code: row.code || '' });
+  });
+  names = [...employees.values()].sort((a, b) =>
+    a.name.localeCompare(b.name) || String(a.code).localeCompare(String(b.code))
+  );
 }
 
 function addEmployeeCodes(matrix, sourceRows) {
@@ -239,8 +254,8 @@ function renderDaily() {
   $('dailyHead').innerHTML = heads.map(h => `<th>${h}</th>`).join('');
 
   const cnt = { P: 0, H: 0, A: 0 };
-  $('dailyBody').innerHTML = names.map((n, i) => {
-    const a = analyse(byKey.get(d + '|' + n));
+  $('dailyBody').innerHTML = names.map((employee, i) => {
+    const a = analyse(byKey.get(d + '|' + employee.key));
     cnt[a.st]++;
     const afterTwoPm = a.inM != null && a.inM > ABSENT_AFTER;
     const late = !afterTwoPm && a.inM != null && a.inM > LATE_AFTER ? fmtHM(a.inM - LATE_AFTER) : '';
@@ -249,7 +264,7 @@ function renderDaily() {
       ? fmt12(a.outM)
       : (a.inM != null ? '<span class="no-out">No out punch</span>' : '');
     return `<tr class="${afterTwoPm ? 'after-2pm' : ''}">
-      <td>${i + 1}</td><td class="name">${esc(n)}</td>
+      <td>${i + 1}</td><td class="name">${esc(employee.name)}${employee.code ? ` <small>(${esc(employee.code)})</small>` : ''}</td>
       <td>${fmt12(a.inM)}</td>
       <td class="late">${late}</td>
       <td>${out}</td>
@@ -424,14 +439,24 @@ async function syncSheet() {
 
 // ---------- PDF export (Daily Report) ----------
 function dailyRowsFor(data, date) {
-  const map = new Map(data.map(r => [r.d + '|' + r.name, r]));
-  const emp = [...new Set(data.map(r => r.name))].sort((a, b) => a.localeCompare(b));
+  const map = new Map(data.map(row => [row.d + '|' + employeeIdentity(row), row]));
+  const empMap = new Map();
+  data.forEach(row => {
+    const identity = employeeIdentity(row);
+    if (!empMap.has(identity))
+      empMap.set(identity, { ...row, key: identity });
+  });
+  const employees = [...empMap.values()].sort((a, b) =>
+    a.name.localeCompare(b.name) || String(a.code).localeCompare(String(b.code))
+  );
   const cnt = { P: 0, H: 0, A: 0 };
-  const body = emp.map((n, i) => {
-    const a = analyse(map.get(date + '|' + n));
+  const body = employees.map((employee, i) => {
+    const a = analyse(map.get(date + '|' + employee.key));
     cnt[a.st]++;
     return [
-      i + 1, n, fmt12(a.inM),
+      i + 1,
+      employee.code ? `${employee.name} (${employee.code})` : employee.name,
+      fmt12(a.inM),
       a.inM != null && a.inM > LATE_AFTER ? fmtHM(a.inM - LATE_AFTER) : '',
       a.outM != null ? fmt12(a.outM) : (a.inM != null ? 'No out punch' : ''),
       a.outM != null && a.outM < EARLY_BEFORE ? fmtHM(EARLY_BEFORE - a.outM) : '',
@@ -815,6 +840,13 @@ function analyse(r) {
   return { inM, outM, work, st };
 }
 
+function employeeIdentity(row) {
+  const code = String(row.code || '').trim();
+  return code
+    ? `code:${code.toUpperCase()}`
+    : `name:${String(row.name || '').trim().toUpperCase()}`;
+}
+
 const pill = s => `<span class="pill ${s}">${s}</span>`;
 
 // ---------- API ----------
@@ -908,8 +940,16 @@ let selectedLocationType = 'branch';
 
 function indexRows() {
   byKey = new Map();
-  rows.forEach(r => byKey.set(r.d + '|' + r.name, r));
-  names = [...new Set(rows.map(r => r.name))].sort((a, b) => a.localeCompare(b));
+  const employees = new Map();
+  rows.forEach(row => {
+    const identity = employeeIdentity(row);
+    byKey.set(row.d + '|' + identity, row);
+    if (!employees.has(identity))
+      employees.set(identity, { key: identity, name: row.name, code: row.code || '' });
+  });
+  names = [...employees.values()].sort((a, b) =>
+    a.name.localeCompare(b.name) || String(a.code).localeCompare(String(b.code))
+  );
 }
 
 function addEmployeeCodes(matrix, sourceRows) {
@@ -954,8 +994,8 @@ function renderDaily() {
   $('dailyHead').innerHTML = heads.map(h => `<th>${h}</th>`).join('');
 
   const cnt = { P: 0, H: 0, A: 0 };
-  $('dailyBody').innerHTML = names.map((n, i) => {
-    const a = analyse(byKey.get(d + '|' + n));
+  $('dailyBody').innerHTML = names.map((employee, i) => {
+    const a = analyse(byKey.get(d + '|' + employee.key));
     cnt[a.st]++;
     const afterTwoPm = a.inM != null && a.inM > ABSENT_AFTER;
     const late = !afterTwoPm && a.inM != null && a.inM > LATE_AFTER ? fmtHM(a.inM - LATE_AFTER) : '';
@@ -964,7 +1004,7 @@ function renderDaily() {
       ? fmt12(a.outM)
       : (a.inM != null ? '<span class="no-out">No out punch</span>' : '');
     return `<tr class="${afterTwoPm ? 'after-2pm' : ''}">
-      <td>${i + 1}</td><td class="name">${esc(n)}</td>
+      <td>${i + 1}</td><td class="name">${esc(employee.name)}${employee.code ? ` <small>(${esc(employee.code)})</small>` : ''}</td>
       <td>${fmt12(a.inM)}</td>
       <td class="late">${late}</td>
       <td>${out}</td>
@@ -1139,14 +1179,24 @@ async function syncSheet() {
 
 // ---------- PDF export (Daily Report) ----------
 function dailyRowsFor(data, date) {
-  const map = new Map(data.map(r => [r.d + '|' + r.name, r]));
-  const emp = [...new Set(data.map(r => r.name))].sort((a, b) => a.localeCompare(b));
+  const map = new Map(data.map(row => [row.d + '|' + employeeIdentity(row), row]));
+  const empMap = new Map();
+  data.forEach(row => {
+    const identity = employeeIdentity(row);
+    if (!empMap.has(identity))
+      empMap.set(identity, { ...row, key: identity });
+  });
+  const employees = [...empMap.values()].sort((a, b) =>
+    a.name.localeCompare(b.name) || String(a.code).localeCompare(String(b.code))
+  );
   const cnt = { P: 0, H: 0, A: 0 };
-  const body = emp.map((n, i) => {
-    const a = analyse(map.get(date + '|' + n));
+  const body = employees.map((employee, i) => {
+    const a = analyse(map.get(date + '|' + employee.key));
     cnt[a.st]++;
     return [
-      i + 1, n, fmt12(a.inM),
+      i + 1,
+      employee.code ? `${employee.name} (${employee.code})` : employee.name,
+      fmt12(a.inM),
       a.inM != null && a.inM > LATE_AFTER ? fmtHM(a.inM - LATE_AFTER) : '',
       a.outM != null ? fmt12(a.outM) : (a.inM != null ? 'No out punch' : ''),
       a.outM != null && a.outM < EARLY_BEFORE ? fmtHM(EARLY_BEFORE - a.outM) : '',
@@ -1636,17 +1686,17 @@ async function loadSummary() {
 
     // Uses the same analyse() as the Daily Report, so the two views can never disagree.
     const rowsByBranch = new Map(await Promise.all(all.map(async ({ branch, data }) => {
-      const emp = [...new Set(data.map(r => r.name))];
-      const day = new Map(data.filter(r => r.d === date).map(r => [r.name, r]));
+      const employees = [...new Map(data.map(row => [employeeIdentity(row), row])).values()];
+      const day = new Map(data.filter(row => row.d === date).map(row => [employeeIdentity(row), row]));
       const cnt = { P: 0, H: 0, A: 0 };
       let work = 0;
-      emp.forEach(n => {
-        const a = analyse(day.get(n));
+      employees.forEach(employee => {
+        const a = analyse(day.get(employeeIdentity(employee)));
         cnt[a.st]++;
         work += a.work;
       });
       return [branch.toUpperCase(), {
-        branch, total: emp.length, work, present: cnt.P, absent: cnt.A, half: cnt.H
+        branch, total: employees.length, work, present: cnt.P, absent: cnt.A, half: cnt.H
       }];
     })));
     const groups = [];
@@ -2019,17 +2069,17 @@ async function loadSummary() {
 
     // Uses the same analyse() as the Daily Report, so the two views can never disagree.
     const rowsByBranch = new Map(await Promise.all(all.map(async ({ branch, data }) => {
-      const emp = [...new Set(data.map(r => r.name))];
-      const day = new Map(data.filter(r => r.d === date).map(r => [r.name, r]));
+      const employees = [...new Map(data.map(row => [employeeIdentity(row), row])).values()];
+      const day = new Map(data.filter(row => row.d === date).map(row => [employeeIdentity(row), row]));
       const cnt = { P: 0, H: 0, A: 0 };
       let work = 0;
-      emp.forEach(n => {
-        const a = analyse(day.get(n));
+      employees.forEach(employee => {
+        const a = analyse(day.get(employeeIdentity(employee)));
         cnt[a.st]++;
         work += a.work;
       });
       return [branch.toUpperCase(), {
-        branch, total: emp.length, work, present: cnt.P, absent: cnt.A, half: cnt.H
+        branch, total: employees.length, work, present: cnt.P, absent: cnt.A, half: cnt.H
       }];
     })));
     const groups = [];
@@ -2147,4 +2197,3 @@ on('to', 'onchange', renderMatrix);
 
 // show any unexpected script error on screen instead of failing silently
 window.addEventListener('error', e => setMsg('Script error: ' + e.message, true));
-

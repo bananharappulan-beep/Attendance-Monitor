@@ -76,9 +76,21 @@ class INACTIVE:
                 mask, ["EMPLOYEE CODE", "EMPLOYEE NAME"]
             ]
 
+        if inactive_data:
+            joined = pd.concat(
+                [
+                    frame.assign(BRANCH=branch)
+                    for branch, frame in inactive_data.items()
+                ],
+                ignore_index=True,
+            )
+            codes = joined["EMPLOYEE CODE"].fillna("").astype(str).str.strip()
+            duplicate_rows = joined.loc[
+                codes.ne("") & codes.duplicated(keep=False),
+                ["BRANCH", "EMPLOYEE CODE", "EMPLOYEE NAME"],
+            ].to_dict(orient="records")
+        else:
+            duplicate_rows = []
+        print(f"Duplicate employees found across branches: {duplicate_rows}")
+
         return inactive_data
-
-        
-
-
-

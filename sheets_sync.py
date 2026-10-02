@@ -107,6 +107,13 @@ def _employee_key(name):
     return "".join(char for char in str(name or "").casefold() if char.isalnum())
 
 
+def _employee_identity(code, name):
+    code = str(code or "").strip()
+    if code:
+        return f"code:{code.casefold()}"
+    return f"name:{_employee_key(name)}"
+
+
 def _label(d):
     """date -> '1/9/2026' (no zero padding, same as the backup file)."""
     return f"{d.day}/{d.month}/{d.year}"
@@ -215,9 +222,10 @@ def _fetch_source_once():
                 branch = _branch_name(tab, _cell(r, i_company), is_core_office)
                 rows = out.setdefault(branch, {})
                 t_in, t_out = parse_time(_cell(r, i_in)), parse_time(_cell(r, i_out))
-                rows[(d.isoformat(), name)] = {
+                code = _cell(r, i_code).strip()
+                rows[(d.isoformat(), _employee_identity(code, name))] = {
                     "d": d.isoformat(),
-                    "code": _cell(r, i_code),
+                    "code": code,
                     "name": name,
                     "inT": t_in.strftime("%H:%M") if t_in else "",
                     "outT": t_out.strftime("%H:%M") if t_out else "",
@@ -231,7 +239,7 @@ def _fetch_source_once():
 
 # ---------- build / merge the matrix ----------
 def parse_existing(values):
-    """Saved worksheet values -> ({name: {code, statuses}}, {dates found in header})."""
+    """Saved worksheet values -> ({employee_id: record}, {dates found in header})."""
     if not values:
         return {}, set()
     header = [str(cell).strip().upper() for cell in values[0]]
@@ -248,9 +256,11 @@ def parse_existing(values):
         name = _cell(row, name_column).strip()
         if not name:
             continue
-        record = saved.setdefault(name, {"code": "", "statuses": {}})
-        if code_column >= 0 and not record["code"]:
-            record["code"] = _cell(row, code_column).strip()
+        code = _cell(row, code_column).strip() if code_column >= 0 else ""
+        identity = _employee_identity(code, name)
+        record = saved.setdefault(
+            identity, {"code": code, "name": name, "statuses": {}}
+        )
         for day, index in date_columns:
             value = _cell(row, index).strip().upper()
             if day and value in ("P", "H", "A"):
@@ -265,33 +275,59 @@ def build_matrix(rows, saved, header_dates, only_dates=None, branch=None, all_so
     Header = EMPLOYEE CODE + EMPLOYEE NAME + every day of every month involved.
     Only the dates in `only_dates` (None = all dates in the source) are (re)calculated;
     every other saved value is kept unchanged."""
-    by_key = {(r["d"], r["name"]): r for r in rows}
+    by_key = {
+        (row["d"], _employee_identity(row.get("code"), row["name"])): row
+        for row in rows
+    }
     src_dates = {r["d"] for r in rows}            # dates that have attendance records
     if only_dates is not None:
         src_dates &= set(only_dates)
-    names = set(saved) | {r["name"] for r in rows}
-    status = {n: dict(saved.get(n, {}).get("statuses", {})) for n in names}
-    codes = {n: saved.get(n, {}).get("code", "") for n in names}
+    employees = {
+        identity: {
+            "code": record.get("code", ""),
+            "name": record.get("name", ""),
+            "statuses": dict(record.get("statuses", {})),
+        }
+        for identity, record in saved.items()
+    }
     for row in rows:
-        if row.get("code") and not codes[row["name"]]:
-            codes[row["name"]] = str(row["code"]).strip()
+        identity = _employee_identity(row.get("code"), row["name"])
+        employee = employees.setdefault(
+            identity, {"code": "", "name": row["name"], "statuses": {}}
+        )
+        if row.get("code"):
+            employee["code"] = str(row["code"]).strip()
+        if not employee["name"]:
+            employee["name"] = row["name"]
     if all_source is not None:
-        for name in names:
-            if not codes[name]:
-                codes[name] = _resolve_employee_code(name, branch or "", all_source)
+        for employee in employees.values():
+            if not employee["code"]:
+                employee["code"] = _resolve_employee_code(
+                    employee["name"], branch or "", all_source
+                )
     for d in src_dates:
-        for n in names:                           # employee missing on a date with data -> A
-            status[n][d] = status_for(by_key.get((d, n)))
+        for identity, employee in employees.items():
+            employee["statuses"][d] = status_for(by_key.get((d, identity)))
 
     months = {(d.year, d.month) for d in header_dates}
     months |= {(int(d[:4]), int(d[5:7])) for d in src_dates}
-    months |= {(int(d[:4]), int(d[5:7])) for s in status.values() for d in s}
+    months |= {
+        (int(d[:4]), int(d[5:7]))
+        for employee in employees.values()
+        for d in employee["statuses"]
+    }
     all_dates = [date(y, m, day) for y, m in sorted(months)
                  for day in range(1, monthrange(y, m)[1] + 1)]
 
     header = [CODE_HEADER, HEADER] + [_label(d) for d in all_dates]
-    body = [[codes[n], n] + [status[n].get(d.isoformat(), "") for d in all_dates]
-            for n in sorted(names, key=str.casefold)]
+    body = [
+        [employee["code"], employee["name"]]
+        + [employee["statuses"].get(day.isoformat(), "") for day in all_dates]
+        for employee in sorted(
+            employees.values(),
+            key=lambda item: (item["name"].casefold(), item["code"].casefold()),
+        )
+    ]
     return [header] + body
 
 
