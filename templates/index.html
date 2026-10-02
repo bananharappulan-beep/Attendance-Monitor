@@ -4,13 +4,28 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Attendance Monitor</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css', v='3') }}">
 </head>
 <body>
 <div class="container">
 
   <header class="topbar">
-    <h1>Attendance Monitor</h1>
+    <div class="topbar-brand">
+      <h1>Attendance Monitor</h1>
+      <div id="userbar" class="userbar">
+        <span id="userIdentity" class="who"></span>
+        <div id="userMenuControl" class="user-menu hidden">
+          <button id="userMenuToggle" class="user-menu-toggle" type="button" aria-label="User menu" title="User menu" aria-haspopup="true" aria-expanded="false" aria-controls="userMenu">
+            <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+          </button>
+          <div id="userMenu" class="user-menu-dropdown hidden">
+            <button id="ubPw" type="button">Change Password</button>
+            <button id="ubOut" type="button">Logout</button>
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="controls">
       <label>Branch
         <select id="branch"></select>
@@ -55,6 +70,7 @@
         <button data-tab="matrix" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM4 10h16M10 4v16"/></svg>Status Matrix</button>
         <button data-tab="inactive" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5 20a7 7 0 0 1 14 0M19 5l2 2-4 4"/></svg>Inactive Employees</button>
         <button data-tab="summary" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V9M12 19V5M19 19v-7"/></svg>Overall Summary</button>
+        <button id="sidebarUsers" class="tab sidebar-admin hidden"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM19 8v6M22 11h-6"/></svg>Users &amp; Access</button>
       </nav>
     </aside>
 
@@ -115,6 +131,7 @@
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/auth-ui.js', v='4') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='4') }}"></script>
 </body>
 </html>

@@ -91,7 +91,7 @@ select { min-width: 180px; }
 
 /* navigation and workspace */
 .app-layout { display: grid; grid-template-columns: 13rem minmax(0, 1fr); gap: 1rem; align-items: start; }
-.sidebar { min-height: calc(100vh - 8rem); padding: .85rem; border: 1px solid rgba(255, 255, 255, .92); border-radius: 1.35rem; background: var(--surface); box-shadow: 10px 12px 24px var(--shadow-dark), -8px -8px 20px var(--shadow-light); }
+.sidebar { display: flex; flex-direction: column; min-height: calc(100vh - 8rem); padding: .85rem; border: 1px solid rgba(255, 255, 255, .92); border-radius: 1.35rem; background: var(--surface); box-shadow: 10px 12px 24px var(--shadow-dark), -8px -8px 20px var(--shadow-light); }
 .sidebar-filter { margin: 0 0 1rem; }
 .sidebar-filter select { width: 100%; min-width: 0; }
 .tabs { display: flex; flex-direction: column; gap: .25rem; }

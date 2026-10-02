@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login - Attendance Monitor</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}">
+</head>
+<body class="login-body">
+  <main class="login-card">
+    <h1>Attendance Monitor</h1>
+    <p class="login-sub">Sign in to continue</p>
+    <div id="loginError" class="form-error hidden" role="alert"></div>
+    <label>Username
+      <input id="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus>
+    </label>
+    <label>Password
+      <span class="pw-row">
+        <input id="password" type="password" autocomplete="current-password">
+        <button type="button" id="togglePw" class="btn-secondary pw-toggle" aria-label="Show password">Show</button>
+      </span>
+    </label>
+    <button id="loginBtn" class="btn login-btn">Login</button>
+  </main>
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const err = $('loginError');
+  function showError(t) { err.textContent = t; err.classList.remove('hidden'); }
+  async function login() {
+    err.classList.add('hidden');
+    const username = $('username').value.trim(), password = $('password').value;
+    if (!username || !password) return showError('Enter your username and password.');
+    $('loginBtn').disabled = true;
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Login failed.');
+      location.href = '/';
+    } catch (e) { showError(e.message); $('password').value = ''; $('password').focus(); }
+    $('loginBtn').disabled = false;
+  }
+  $('loginBtn').onclick = login;
+  ['username', 'password'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') login(); }));
+  $('togglePw').onclick = () => {
+    const show = $('password').type === 'password';
+    $('password').type = show ? 'text' : 'password';
+    $('togglePw').textContent = show ? 'Hide' : 'Show';
+  };
+})();
+</script>
+</body>
+</html>

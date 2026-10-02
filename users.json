@@ -1,0 +1,180 @@
+{
+  "users": {
+    "developer": {
+      "username": "developer",
+      "display_name": "Developer",
+      "role": "developer",
+      "business": "",
+      "permissions": {
+        "download": true,
+        "change_date": true,
+        "tabs": [
+          "daily",
+          "matrix",
+          "inactive",
+          "summary"
+        ]
+      },
+      "password_hash": "scrypt:32768:8:1$S9kQvzDLDDRwY681$1cc4213d7b38ef684f436423a7a64f2c64f0cde5d7dc33bb94fb46ac2bdcfe8578aac51f6fc8baf303426892aef226237e59a5d05fadbcde3b1d84f2e0d183b3",
+      "active": true,
+      "must_change_password": false,
+      "pw_changed": "2026-10-02T12:57:17",
+      "created_at": "2026-10-02T12:22:21",
+      "updated_at": "2026-10-02T12:57:17"
+    },
+    "admin": {
+      "username": "admin",
+      "display_name": "ADMIN",
+      "role": "admin",
+      "business": "",
+      "permissions": {
+        "download": true,
+        "change_date": true,
+        "tabs": [
+          "daily",
+          "matrix",
+          "inactive",
+          "summary"
+        ]
+      },
+      "password_hash": "scrypt:32768:8:1$xNT6U7aoIOAlJGz4$3bf39c1d45726a56a213dbaf03a5d9a5d6fbe3682657f6aa859bc7695704e0e0eb6b18811fdd94b48c6c282c36158ed06e2a2b61dcd8bbd41203c0fe7d42b09a",
+      "active": true,
+      "must_change_password": false,
+      "pw_changed": "2026-10-02T13:26:42",
+      "created_at": "2026-10-02T13:26:42",
+      "updated_at": "2026-10-02T13:39:05"
+    },
+    "magnus": {
+      "username": "magnus",
+      "display_name": "Magnus",
+      "role": "business",
+      "business": "MAGNUS",
+      "permissions": {
+        "download": true,
+        "change_date": true,
+        "tabs": [
+          "daily",
+          "matrix",
+          "inactive",
+          "summary"
+        ]
+      },
+      "password_hash": "scrypt:32768:8:1$KZmtKRYZxTMo7Awk$b24295b183eafe10d3202b24e88b2df6bf2a394012aa121687fd05a6e0c30eb09c47219f60d85cb1b55552257e64db524226fe4f92875a5ad471f52cd73de4b0",
+      "active": true,
+      "must_change_password": false,
+      "pw_changed": "2026-10-02T13:29:42",
+      "created_at": "2026-10-02T13:29:42",
+      "updated_at": "2026-10-02T13:38:43"
+    },
+    "alims": {
+      "username": "alims",
+      "display_name": "ALIMS",
+      "role": "business",
+      "business": "ALIMS",
+      "permissions": {
+        "download": true,
+        "change_date": true,
+        "tabs": [
+          "daily",
+          "matrix",
+          "inactive",
+          "summary"
+        ]
+      },
+      "password_hash": "scrypt:32768:8:1$E4skp9sL1ymhm3nZ$55e98781ddb2577968678f360038fbaef1a49f92c96abdd8ab99cfce373607686a5b85484d736d4a560ecc7fcc8baa59b479d178f450543bb7f68cecda57cacf",
+      "active": true,
+      "must_change_password": false,
+      "pw_changed": "2026-10-02T13:31:46",
+      "created_at": "2026-10-02T13:31:46",
+      "updated_at": "2026-10-02T13:38:58"
+    },
+    "mandd": {
+      "username": "mandd",
+      "display_name": "M&D",
+      "role": "business",
+      "business": "M&D",
+      "permissions": {
+        "download": true,
+        "change_date": true,
+        "tabs": [
+          "daily",
+          "matrix",
+          "inactive",
+          "summary"
+        ]
+      },
+      "password_hash": "scrypt:32768:8:1$fK8QRQArYBSqXVe8$d153c1badf60face0a764395c7ca5a75f006ab4985c2e1c15c485714284a976796bffd934485e7603b95bb8e30f161d5cbfa308def2e0f8a28f1459b2120738c",
+      "active": true,
+      "must_change_password": false,
+      "pw_changed": "2026-10-02T13:33:38",
+      "created_at": "2026-10-02T13:33:38",
+      "updated_at": "2026-10-02T13:38:32"
+    },
+    "merchx": {
+      "username": "merchx",
+      "display_name": "MERCHX",
+      "role": "business",
+      "business": "MERCHX",
+      "permissions": {
+        "download": true,
+        "change_date": true,
+        "tabs": [
+          "daily",
+          "matrix",
+          "inactive",
+          "summary"
+        ]
+      },
+      "password_hash": "scrypt:32768:8:1$NRnG1IE5kwcGmYH3$2df32f08011c69c02b885e7902d55a2764b2c8d1f089b1d4006c2373877fc4e84dca7c430305d639662cc2f2a28daa23ad07e949f114226f6339439660272b5b",
+      "active": true,
+      "must_change_password": false,
+      "pw_changed": "2026-10-02T13:35:10",
+      "created_at": "2026-10-02T13:35:10",
+      "updated_at": "2026-10-02T13:38:38"
+    },
+    "happyusers": {
+      "username": "happyusers",
+      "display_name": "HAPPYUSERS",
+      "role": "business",
+      "business": "HU",
+      "permissions": {
+        "download": true,
+        "change_date": true,
+        "tabs": [
+          "daily",
+          "matrix",
+          "inactive",
+          "summary"
+        ]
+      },
+      "password_hash": "scrypt:32768:8:1$SjnIEiDEfAjT1413$083d43f399cb1331a01a33329775f504337f8bfc2ccb367528941c6a5d08c97a98c3dcae00abdca260e8f165048a9f497da0ec1e28843d913ad9d5dfb1e215d5",
+      "active": true,
+      "must_change_password": false,
+      "pw_changed": "2026-10-02T13:36:33",
+      "created_at": "2026-10-02T13:36:33",
+      "updated_at": "2026-10-02T13:38:49"
+    },
+    "grandis": {
+      "username": "grandis",
+      "display_name": "GRANDIS",
+      "role": "business",
+      "business": "GRANDIS",
+      "permissions": {
+        "download": true,
+        "change_date": true,
+        "tabs": [
+          "daily",
+          "matrix",
+          "inactive",
+          "summary"
+        ]
+      },
+      "password_hash": "scrypt:32768:8:1$ObaZnxVqqARt3pYL$25c641d1d42b888f4b222ca6c88b303aedf0741ba29e76a66559f09383b8247e0df5a2d6fa002e7090373657b48886ff64e42fa9bfb026adccf3bba4d0538b3f",
+      "active": true,
+      "must_change_password": false,
+      "pw_changed": "2026-10-02T13:37:58",
+      "created_at": "2026-10-02T13:37:58",
+      "updated_at": "2026-10-02T13:38:53"
+    }
+  }
+}

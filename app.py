@@ -20,9 +20,10 @@ from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request
 from flask_cors import CORS
 
+import auth
 import sheets_sync
 from config import Config
 
@@ -62,26 +63,42 @@ def create_app():
     CORS(app, resources={r"/api/*": {"origins": Config.CORS_ORIGINS}})
     app.after_request(_compress_json_response)
 
+    auth.init_app(app)          # login, roles, users.json, /login, /api/me, /api/users ...
+
     @app.get("/")
     def index():
+        if not auth.current_user():
+            return redirect("/login")
         return render_template("index.html")
 
+    def _deny(msg="You do not have access to this report."):
+        return jsonify({"error": msg}), 403
+
     @app.get("/api/branches")
+    @auth.login_required
     def branches():
         try:
-            return jsonify(sheets_sync.get_branches())
+            return jsonify(auth.filter_branches(auth.current_user(), sheets_sync.get_branches()))
         except Exception as e:
             return jsonify({"error": str(e)})
 
     @app.get("/api/data")
+    @auth.login_required
     def data():
+        user = auth.current_user()
         branch = request.args.get("branch", "")
+        if not auth.can_view_tab(user, "daily", "summary") or not auth.branch_allowed(user, branch):
+            return _deny()
         try:
-            return jsonify(sheets_sync.get_branch_data(branch))
+            rows = sheets_sync.get_branch_data(branch)
+            if not auth.can_change_date(user):
+                rows = auth.latest_date_only(rows)      # date locked -> latest day only
+            return jsonify(rows)
         except Exception as e:
             return jsonify({"error": str(e)})
 
     @app.post("/api/refresh")
+    @auth.login_required
     def refresh_data():
         try:
             rows, branches = sheets_sync.refresh_cache()
@@ -91,14 +108,22 @@ def create_app():
             return jsonify({"error": str(e)}), 500
 
     @app.get("/api/matrix")
+    @auth.login_required
     def matrix():
+        user = auth.current_user()
         branch = request.args.get("branch", "")
+        if not auth.can_view_tab(user, "matrix") or not auth.branch_allowed(user, branch):
+            return _deny()
         try:
-            return jsonify(sheets_sync.get_saved_matrix(branch))
+            result = sheets_sync.get_saved_matrix(branch)
+            if not auth.can_change_date(user):
+                result = auth.limit_matrix_to_latest_month(result)
+            return jsonify(result)
         except Exception as e:
             return jsonify({"error": str(e)})
 
     @app.get("/api/sync")
+    @auth.roles_required("developer", "admin")          # writes to the output sheet
     def sync_now():
         try:
             rows, branches = sheets_sync.sync()
@@ -108,15 +133,21 @@ def create_app():
             return jsonify({"error": str(e)})
 
     @app.route("/api/inactive", methods=["GET"])
+    @auth.login_required
     def inactive():
+        user = auth.current_user()
+        if not auth.can_view_tab(user, "inactive"):
+            return _deny()
         try:
+            start_date = request.args.get("start_date") if auth.can_change_date(user) else None
             inactive_data = INACTIVE.get_inactive(
-                start_date=request.args.get("start_date"),
+                start_date=start_date,
                 n_days=request.args.get("n_days", default=2, type=int),
             )
             return jsonify({
                 branch: frame.to_dict(orient="records")
                 for branch, frame in inactive_data.items()
+                if auth.branch_allowed(user, branch)
             })
         except Exception as e:
             log.exception("Inactive fetch failed")
