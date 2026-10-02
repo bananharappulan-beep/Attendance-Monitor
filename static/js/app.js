@@ -62,12 +62,51 @@ function analyse(r) {
 const pill = s => `<span class="pill ${s}">${s}</span>`;
 
 // ---------- API ----------
-async function api(path, params) {
-  const qs = params ? '?' + new URLSearchParams(params) : '';
-  const res = await fetch(API_URL + path + qs);
-  const data = await res.json();
-  if (data && data.error) throw new Error(data.error);
-  return data;
+const API_CACHE_TTL_MS = 30_000;
+const API_CACHE_MAX_ENTRIES = 200;
+const apiResponseCache = new Map();
+const apiInflightRequests = new Map();
+let apiCacheGeneration = 0;
+
+function clearApiCache() {
+  apiCacheGeneration++;
+  apiResponseCache.clear();
+  apiInflightRequests.clear();
+}
+
+async function api(path, params, options = {}) {
+  const query = params
+    ? new URLSearchParams(Object.entries(params).sort(([a], [b]) => a.localeCompare(b))).toString()
+    : '';
+  const url = API_URL + path + (query ? '?' + query : '');
+  const useCache = options.cache !== false;
+  const force = options.force === true;
+  const cached = useCache && !force ? apiResponseCache.get(url) : null;
+  if (cached && cached.expiresAt > Date.now()) return cached.data;
+  if (cached) apiResponseCache.delete(url);
+  if (useCache && !force && apiInflightRequests.has(url))
+    return apiInflightRequests.get(url);
+
+  const generation = apiCacheGeneration;
+  const request = (async () => {
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!res.ok) throw new Error((data && data.error) || `Request failed (${res.status})`);
+      if (data && data.error) throw new Error(data.error);
+      if (useCache && generation === apiCacheGeneration) {
+        apiResponseCache.set(url, { data, expiresAt: Date.now() + API_CACHE_TTL_MS });
+        if (apiResponseCache.size > API_CACHE_MAX_ENTRIES)
+          apiResponseCache.delete(apiResponseCache.keys().next().value);
+      }
+      return data;
+    } finally {
+      if (apiInflightRequests.get(url) === request) apiInflightRequests.delete(url);
+    }
+  })();
+
+  if (useCache) apiInflightRequests.set(url, request);
+  return request;
 }
 
 // ---------- State ----------
@@ -324,7 +363,8 @@ async function syncSheet() {
   btn.disabled = true;
   setMsg('Syncing from Google Sheet…');
   try {
-    const r = await api('/api/sync');
+    const r = await api('/api/sync', null, { cache: false });
+    clearApiCache();
     const current = $('branch').value;
     await loadBranches();
     if (current && [...$('branch').options].some(o => o.value === current)) {
@@ -804,7 +844,11 @@ on('businessName', 'onchange', () => {
   updateBranchOptions();
   if (summaryOpen()) loadSummary();
 });
-on('refresh', 'onclick', async () => { await loadBranch(); if (summaryOpen()) loadSummary(); });
+on('refresh', 'onclick', async () => {
+  clearApiCache();
+  await loadBranch();
+  if (summaryOpen()) loadSummary();
+});
 on('inactiveUpdate', 'onclick', loadInactive);
 on('sync', 'onclick', syncSheet);
 on('exportPdf', 'onclick', exportBranchPdf);

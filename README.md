@@ -54,6 +54,10 @@ JSON content. The Docker image intentionally excludes `service-account.json`; `d
 accepts this secret directly (or `GOOGLE_CREDS` if configured separately).
 
 ## API
+The browser keeps successful API GET responses in memory for 30 seconds (up to 200 entries)
+and shares in-flight requests. The dashboard's Refresh button and a successful manual sync clear
+this cache; sync requests themselves are never cached.
+
 | Route | Description |
 |---|---|
 | `GET /api/branches` | List of branches |

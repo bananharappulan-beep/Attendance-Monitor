@@ -11,6 +11,7 @@ Scheduler
                 yesterday's P/H/A column is archived, then data_fetch.py refreshes source data
   * every SYNC_INTERVAL_MINUTES: dashboard cache refresh (does not write to the output sheet)
 """
+import gzip
 import logging
 import subprocess
 import sys
@@ -30,9 +31,36 @@ log = logging.getLogger("attendance")
 
 from inaactive import INACTIVE
 
+
+def _compress_json_response(response):
+    """Gzip sizeable JSON API responses when the client supports it."""
+    if (
+        not response.mimetype == "application/json"
+        or response.status_code < 200
+        or response.status_code in (204, 304)
+        or response.headers.get("Content-Encoding")
+        or response.direct_passthrough
+    ):
+        return response
+
+    body = response.get_data()
+    if len(body) < 1024:
+        return response
+
+    response.vary.add("Accept-Encoding")
+    if request.accept_encodings.best_match(["gzip"]) != "gzip":
+        return response
+
+    response.set_data(gzip.compress(body, compresslevel=5, mtime=0))
+    response.headers["Content-Encoding"] = "gzip"
+    response.headers.pop("ETag", None)
+    return response
+
+
 def create_app():
     app = Flask(__name__)
     CORS(app, resources={r"/api/*": {"origins": Config.CORS_ORIGINS}})
+    app.after_request(_compress_json_response)
 
     @app.get("/")
     def index():
