@@ -2,6 +2,7 @@
 .env
 service-account.json
 *.json
+!users.json
 
 # Python junk
 __pycache__/
