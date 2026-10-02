@@ -413,9 +413,13 @@ def archive_yesterday():
 def refresh_cache():
     """Frequent job: keeps the dashboard fresh without touching the output sheet."""
     global _cache
-    source = fetch_source()
-    with _cache_lock:
-        _cache = source
+    with _sync_lock:
+        source = fetch_source()
+        with _cache_lock:
+            _cache = source
+    rows = sum(len(branch_rows) for branch_rows in source.values())
+    log.info("Refreshed dashboard cache: %d rows, %d branches", rows, len(source))
+    return rows, len(source)
 
 
 def _source():

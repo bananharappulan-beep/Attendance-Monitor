@@ -90,7 +90,7 @@ async function api(path, params, options = {}) {
   const generation = apiCacheGeneration;
   const request = (async () => {
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { method: options.method || 'GET', cache: 'no-store' });
       const data = await res.json();
       if (!res.ok) throw new Error((data && data.error) || `Request failed (${res.status})`);
       if (data && data.error) throw new Error(data.error);
@@ -395,24 +395,54 @@ function dailyRowsFor(data, date) {
   return { body, cnt };
 }
 
-function makePdf(branch, data, date) {
+let loraFontPromise;
+let loraBoldFontPromise;
+
+async function registerLoraFont(pdf) {
+  if (!loraFontPromise) {
+    loraFontPromise = fetchPdfFont('/static/fonts/Lora-Variable.ttf');
+    loraBoldFontPromise = fetchPdfFont('/static/fonts/Lora-Bold.ttf');
+  }
+  const [fontData, boldFontData] = await Promise.all([loraFontPromise, loraBoldFontPromise]);
+  pdf.addFileToVFS('Lora-Variable.ttf', fontData);
+  pdf.addFont('Lora-Variable.ttf', 'Lora', 'normal');
+  pdf.addFileToVFS('Lora-Bold.ttf', boldFontData);
+  pdf.addFont('Lora-Bold.ttf', 'Lora', 'bold');
+}
+
+async function fetchPdfFont(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('Could not load the Lora font file.');
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000)
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  return btoa(binary);
+}
+
+async function makePdf(branch, data, date) {
   const { jsPDF } = window.jspdf;
   const { body, cnt } = dailyRowsFor(data, date);
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  await registerLoraFont(doc);
+  const pageWidth = doc.internal.pageSize.getWidth();
+  doc.setFont('Lora', 'bold');
   doc.setFontSize(16);
-  doc.text(`${branch} - Daily Report`, 40, 40);
+  doc.text(`${branch} - Daily Report`, pageWidth / 2, 40, { align: 'center' });
+  doc.setFont('Lora', 'normal');
   doc.setFontSize(10);
   doc.setTextColor(100);
-  doc.text(`Date: ${dmy(date)}   |   Total: ${body.length}   Present: ${cnt.P}   Half-day: ${cnt.H}   Absent: ${cnt.A}`, 40, 58);
+  doc.text(`Date: ${dmy(date)}   |   Total: ${body.length}   Present: ${cnt.P}   Half-day: ${cnt.H}   Absent: ${cnt.A}`, pageWidth / 2, 58, { align: 'center' });
   const colors = { P: [[220, 252, 231], [22, 101, 52]], H: [[254, 243, 199], [146, 64, 14]], A: [[254, 226, 226], [153, 27, 27]] };
   doc.autoTable({
     startY: 70,
     head: [['SL NO', 'EMP NAME', 'PUNCH IN', 'LATE', 'PUNCH OUT', 'EARLY LEAVING', 'WORKING HRS', 'STATUS']],
     body,
-    styles: { fontSize: 8.5, cellPadding: 4 },
-    headStyles: { fillColor: [15, 23, 42] },
+    styles: { font: 'Lora', fontSize: 8.5, cellPadding: 4, halign: 'center' },
+    headStyles: { fillColor: [217, 217, 217], textColor: [0, 0, 0], font: 'Lora', fontStyle: 'bold', halign: 'center' },
     didParseCell: h => {
       if (h.section !== 'body') return;
+      if (h.column.index === 1) h.cell.styles.halign = 'left';
       if (h.column.index === 3 || h.column.index === 5) h.cell.styles.textColor = [220, 38, 38];
       if (h.column.index === 7) {
         const [bg, fg] = colors[h.cell.raw] || colors.A;
@@ -441,6 +471,8 @@ async function pdfReady() {
       await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
     if (!window.html2canvas)
       await loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');
+    await document.fonts.load('400 12px Lora');
+    await document.fonts.ready;
     return true;
   } catch (e) {
     setMsg('PDF library could not be loaded (check internet / CDN access).', true);
@@ -453,7 +485,7 @@ async function exportBranchPdf() {
   if (!(await pdfReady())) return;
   if (!date || !rows.length) return setMsg('No data to export for this branch/date.', true);
   const branch = $('branch').selectedOptions[0]?.textContent || $('branch').value;
-  makePdf(branch, rows, date);
+  await makePdf(branch, rows, date);
   setMsg(`Exported ${branch}.pdf`);
 }
 
@@ -467,7 +499,7 @@ async function exportAllPdf() {
     const branches = await api('/api/branches');
     for (let i = 0; i < branches.length; i++) {
       setMsg(`Preparing ${branches[i]}.pdf (${i + 1}/${branches.length})…`);
-      makePdf(branches[i], await api('/api/data', { branch: branches[i] }), date);
+      await makePdf(branches[i], await api('/api/data', { branch: branches[i] }), date);
       await new Promise(r => setTimeout(r, 500));   // small gap so the browser accepts every download
     }
     setMsg(`Downloaded ${branches.length} branch PDF(s) for ${dmy(date)}. If some are missing, allow multiple downloads in your browser.`);
@@ -674,9 +706,100 @@ function exportMatrixPdf() {
     `${safeBranch}-status-matrix.pdf`, { landscape: true, theme: 'matrix' });
 }
 
-function exportSummaryPdf() {
+async function exportInactivePdf() {
+  if (!(await pdfReady())) return;
+  const table = $('inactiveTable');
+  const body = [...table.querySelectorAll('tbody tr')]
+    .filter(row => !row.querySelector('.empty'))
+    .map(row => [...row.cells].map(cell => cell.textContent.trim()));
+  if (!body.length) return setMsg('No inactive employees to export for this view.', true);
+
+  const branch = $('branch').selectedOptions[0]?.textContent || $('branch').value;
+  const safeBranch = String(branch).replace(/[\\/:*?"<>|]/g, '_').trim();
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ unit: 'pt', format: 'a4' });
+  await registerLoraFont(pdf);
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  pdf.setFont('Lora', 'bold');
+  pdf.setFontSize(16);
+  pdf.setTextColor(0, 0, 0);
+  pdf.text(`Inactive Employees - ${branch}`, pageWidth / 2, 34, { align: 'center' });
+  pdf.setFont('Lora', 'normal');
+  pdf.setFontSize(9);
+  pdf.setTextColor(90, 90, 90);
+  pdf.text($('inactiveHint').textContent, pageWidth / 2, 52, { align: 'center' });
+  pdf.autoTable({
+    startY: 66,
+    margin: { left: 32, right: 32 },
+    head: [['EMPLOYEE CODE', 'EMPLOYEE NAME']],
+    body,
+    showHead: 'everyPage',
+    styles: { font: 'Lora', fontSize: 10, cellPadding: 6, halign: 'center', textColor: [0, 0, 0] },
+    headStyles: { fillColor: [217, 217, 217], textColor: [0, 0, 0], font: 'Lora', fontStyle: 'bold', halign: 'center' }
+  });
+  pdf.save(`${safeBranch}-inactive-employees.pdf`);
+  setMsg(`Exported ${safeBranch}-inactive-employees.pdf`);
+}
+
+async function exportSummaryPdf() {
   const title = `Overall Summary${$('summaryHint').textContent ? ` - ${$('summaryHint').textContent}` : ''}`;
-  return exportTablePdf('summaryTable', title, 'overall-summary.pdf', { theme: 'summary' });
+  if (!(await pdfReady())) return;
+
+  const table = $('summaryTable');
+  const header = [...table.querySelectorAll('thead th')].map(cell => cell.textContent.trim());
+  const summaryRows = [...table.querySelectorAll('tbody tr')].filter(row => !row.querySelector('.empty'));
+  const body = summaryRows.map(row => [...row.cells].map(cell => cell.textContent.trim()));
+  const highlightedRows = new Set(summaryRows.flatMap((row, index) =>
+    row.classList.contains('business-row') || row.classList.contains('total-row') ? [index] : []
+  ));
+  if (!body.length) return setMsg('No data to export for this view.', true);
+
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
+  await registerLoraFont(pdf);
+  pdf.setFont('Lora', 'bold');
+  pdf.setFontSize(16);
+  pdf.setTextColor(0, 0, 0);
+  pdf.text(title, 28, 32);
+  pdf.autoTable({
+    startY: 48,
+    margin: { left: 28, right: 28 },
+    head: [header],
+    body,
+    showHead: 'everyPage',
+    styles: { font: 'Lora', fontSize: 8, cellPadding: 5, textColor: [0, 0, 0] },
+    headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], font: 'Lora', fontStyle: 'bold', halign: 'center' },
+    didParseCell: cell => {
+      if (cell.section === 'head') {
+        if ([0, 1, 2, 6].includes(cell.column.index)) {
+          cell.cell.styles.fillColor = [217, 217, 217];
+          cell.cell.styles.textColor = [0, 0, 0];
+        } else if (cell.column.index === 3) {
+          cell.cell.styles.fillColor = [220, 252, 231];
+          cell.cell.styles.textColor = [22, 101, 52];
+        } else if (cell.column.index === 4) {
+          cell.cell.styles.fillColor = [254, 243, 199];
+          cell.cell.styles.textColor = [146, 64, 14];
+        } else if (cell.column.index === 5) {
+          cell.cell.styles.fillColor = [254, 226, 226];
+          cell.cell.styles.textColor = [153, 27, 27];
+        }
+      } else if (cell.section === 'body') {
+        if (highlightedRows.has(cell.row.index)) {
+          cell.cell.styles.fillColor = [217, 217, 217];
+          cell.cell.styles.textColor = [0, 0, 0];
+          cell.cell.styles.fontStyle = 'bold';
+        } else if ([3, 4, 5].includes(cell.column.index)) {
+          const colors = [[22, 101, 52], [146, 64, 14], [153, 27, 27]];
+          cell.cell.styles.textColor = colors[cell.column.index - 3];
+          cell.cell.styles.fontStyle = 'bold';
+        }
+        if (cell.column.index !== 1) cell.cell.styles.halign = 'center';
+      }
+    }
+  });
+  pdf.save('overall-summary.pdf');
+  setMsg('Exported overall-summary.pdf');
 }
 
 // ---------- Tabs & events ----------
@@ -694,8 +817,10 @@ async function loadInactive() {
     const knownBranches = new Set(
       [...branchSelect.options].map(option => String(option.dataset.source || option.value).toUpperCase())
     );
+    const coreOfficeMode = $('businessName').value !== 'ALL'
+      && $('locationType').value === 'core-office';
     Object.keys(inactiveByBranch).forEach(branch => {
-      if (knownBranches.has(branch.toUpperCase())) return;
+      if (coreOfficeMode || knownBranches.has(branch.toUpperCase())) return;
       const option = new Option(branch, branch);
       option.dataset.source = branch;
       option.dataset.business = '';
@@ -807,6 +932,7 @@ function showTab(t) {
   $('exportPdf').classList.toggle('hidden', t !== 'daily');
   $('exportAll').classList.toggle('hidden', t !== 'daily');
   $('exportMatrixPdf').classList.toggle('hidden', t !== 'matrix');
+  $('exportInactivePdf').classList.toggle('hidden', t !== 'inactive');
   $('exportSummaryPdf').classList.toggle('hidden', t !== 'summary');
   if (t === 'inactive') loadInactive();
   if (t === 'summary') loadSummary();
@@ -845,15 +971,27 @@ on('businessName', 'onchange', () => {
   if (summaryOpen()) loadSummary();
 });
 on('refresh', 'onclick', async () => {
-  clearApiCache();
-  await loadBranch();
-  if (summaryOpen()) loadSummary();
+  const button = $('refresh');
+  button.disabled = true;
+  setMsg('Refreshing data from the source…');
+  try {
+    await api('/api/refresh', null, { cache: false, method: 'POST' });
+    clearApiCache();
+    await loadBranch();
+    if (!$('inactive').classList.contains('hidden')) await loadInactive();
+    if (summaryOpen()) await loadSummary();
+  } catch (e) {
+    setMsg('Refresh failed: ' + (e.message || e), true);
+  } finally {
+    button.disabled = false;
+  }
 });
 on('inactiveUpdate', 'onclick', loadInactive);
 on('sync', 'onclick', syncSheet);
 on('exportPdf', 'onclick', exportBranchPdf);
 on('exportAll', 'onclick', exportAllPdf);
 on('exportMatrixPdf', 'onclick', exportMatrixPdf);
+on('exportInactivePdf', 'onclick', exportInactivePdf);
 on('exportSummaryPdf', 'onclick', exportSummaryPdf);
 on('date', 'onchange', () => { setMonthRange(); renderDaily(); renderMatrix(); if (summaryOpen()) loadSummary(); });
 on('from', 'onchange', renderMatrix);

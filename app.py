@@ -81,6 +81,15 @@ def create_app():
         except Exception as e:
             return jsonify({"error": str(e)})
 
+    @app.post("/api/refresh")
+    def refresh_data():
+        try:
+            rows, branches = sheets_sync.refresh_cache()
+            return jsonify({"rows": rows, "branches": branches})
+        except Exception as e:
+            log.exception("Manual data refresh failed")
+            return jsonify({"error": str(e)}), 500
+
     @app.get("/api/matrix")
     def matrix():
         branch = request.args.get("branch", "")

@@ -1,4 +1,10 @@
-@import url('https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap');
+@font-face {
+  font-family: 'Lora';
+  src: url('../fonts/Lora-Variable.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+}
 
 :root {
   --font: 'Lora', Georgia, 'Times New Roman', serif;
@@ -110,7 +116,7 @@ select { min-width: 180px; }
 
 /* summary cards */
 .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; margin-bottom: .75rem; }
-.card { background: var(--surface); border: 1px solid rgba(255, 255, 255, .92); border-radius: 1.25rem; padding: .9rem; box-shadow: 8px 10px 20px var(--shadow-dark), -6px -6px 16px var(--shadow-light); }
+.card { background: var(--surface); border: 1px solid rgba(255, 255, 255, .92); border-radius: 1.25rem; padding: .9rem; box-shadow: 8px 10px 20px var(--shadow-dark), -6px -6px 16px var(--shadow-light); text-align: center; }
 .card .label { font-size: .75rem; color: var(--muted); }
 .card .value { font-size: 1.5rem; font-weight: 700; }
 
@@ -120,6 +126,8 @@ select { min-width: 180px; }
 .data-table { width: 100%; border-collapse: collapse; font-size: .9375rem; }
 .data-table th { position: sticky; top: 0; z-index: 5; background: var(--head); color: var(--dark); text-align: center; padding: .7rem .8rem; white-space: nowrap; box-shadow: 0 2px 4px var(--shadow-dark); }
 .data-table td { padding: .625rem .75rem; border-top: 1px solid rgba(31, 64, 61, .08); text-align: center; }
+#daily .data-table tbody td:nth-child(2) { text-align: left; }
+#inactive .data-table tbody td:nth-child(2) { text-align: center; }
 .data-table tbody tr:hover { background: rgba(255, 255, 255, .22); }
 .data-table tbody tr.after-2pm { background: var(--red-bg); }
 .data-table .name { font-weight: 500; }
@@ -138,7 +146,7 @@ select { min-width: 180px; }
 .matrix-table td { padding: .25rem; text-align: center; }
 .matrix-table tbody tr { border-top: 1px solid var(--border); }
 .matrix-table td.emp-code { position: sticky; left: 0; z-index: 2; width: 8rem; min-width: 8rem; max-width: 8rem; overflow: hidden; background: var(--surface); text-align: center; padding: .25rem .5rem; white-space: nowrap; text-overflow: ellipsis; }
-.matrix-table td.emp { position: sticky; left: 8rem; z-index: 1; background: var(--surface); text-align: center; padding: .25rem .75rem; font-weight: 500; white-space: nowrap; }
+.matrix-table td.emp { position: sticky; left: 8rem; z-index: 1; background: var(--surface); text-align: left; padding: .25rem .75rem; font-weight: 500; white-space: nowrap; }
 
 /* status pills */
 .pill { display: inline-block; width: 1.75rem; text-align: center; border-radius: .25rem; font-weight: 600; }
@@ -160,8 +168,13 @@ select { min-width: 180px; }
   .tab.active { border-left-color: transparent; border-bottom-color: var(--dark); }
 }
 /* overall summary */
-.total-row td { font-weight: 700; background: var(--head); }
-#summary .business-row td { font-weight: 700; background: #e8eef5; border-top: 2px solid var(--border); }
+#summary .data-table tr.business-row td,
+#summary .data-table tr.total-row td {
+  font-weight: 700;
+  background: #d9d9d9;
+  color: #000;
+}
+#summary .business-row td { border-top: 2px solid var(--border); }
 #summary .summary-branch { padding-left: 2rem; }
 
 

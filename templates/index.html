@@ -23,6 +23,7 @@
           <button id="exportPdf" class="btn-export" title="Export this branch's Daily Report as PDF"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 19h14"/></svg>Export PDF</button>
           <button id="exportAll" class="btn-export" title="Download one PDF per branch"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 19h14"/></svg>All PDFs</button>
           <button id="exportMatrixPdf" class="btn-export hidden" title="Export the Status Matrix as PDF"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 19h14"/></svg>Matrix PDF</button>
+          <button id="exportInactivePdf" class="btn-export hidden" title="Export Inactive Employees as PDF"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 19h14"/></svg>Inactive PDF</button>
           <button id="exportSummaryPdf" class="btn-export hidden" title="Export the Overall Summary as PDF"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 19h14"/></svg>Summary PDF</button>
         </div>
     </div>
@@ -87,7 +88,7 @@
     </div>
     <div class="hint" id="inactiveHint">Leave Start Date blank to check the latest archived dates.</div>
     <div class="table-wrap inactive-table-wrap">
-      <table class="data-table">
+      <table id="inactiveTable" class="data-table">
         <thead><tr><th>EMPLOYEE CODE</th><th>EMPLOYEE NAME</th></tr></thead>
         <tbody id="inactiveBody"></tbody>
       </table>
