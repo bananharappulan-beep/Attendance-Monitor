@@ -545,8 +545,7 @@ function showTab(tab) {
   $('exportMatrixPdf').classList.toggle('hidden', tab !== 'matrix');
   $('exportInactivePdf').classList.toggle('hidden', tab !== 'inactive');
   $('exportSummaryPdf').classList.toggle('hidden', tab !== 'summary');
-  if (tab === 'matrix') loadMatrix();
-  if (tab === 'summary') loadSummary();
+  refreshActiveView();
   filterVisibleRows();
 }
 
@@ -559,22 +558,16 @@ const bind = (id, event, handler) => {
 };
 bind('branch', 'onchange', () => {
   $('date').value = '';
-  loadBranch().then(() => {
-    if (!$('summary').classList.contains('hidden')) loadSummary();
-  });
+  refreshActiveView();
 });
 bind('locationType', 'onchange', () => {
   if ($('businessName').value === 'ALL') allBusinessType = $('locationType').value;
   else selectedLocationType = $('locationType').value;
-  updateBranchOptions().then(() => {
-    if (!$('summary').classList.contains('hidden')) loadSummary();
-  });
+  updateBranchOptions(false).then(refreshActiveView);
 });
 bind('businessName', 'onchange', () => {
   updateLocationTypeOptions();
-  updateBranchOptions().then(() => {
-    if (!$('summary').classList.contains('hidden')) loadSummary();
-  });
+  updateBranchOptions(false).then(refreshActiveView);
 });
 bind('date', 'onchange', () => {
   setMonthRange();
@@ -585,6 +578,19 @@ bind('date', 'onchange', () => {
 bind('from', 'onchange', renderMatrix);
 bind('to', 'onchange', renderMatrix);
 bind('exportSummaryPdf', 'onclick', exportSummaryPdf);
+
+async function refreshActiveView() {
+  if (!$('branch').value) return;
+  clearApiCache();
+  const activeTab = ['daily', 'matrix', 'inactive', 'summary']
+    .find(id => !$(`${id}`).classList.contains('hidden'));
+  if (activeTab === 'summary') {
+    await loadSummary();
+    return;
+  }
+  await loadBranch();
+  if (activeTab === 'inactive') await loadInactive();
+}
 
 async function loadSummary() {
   const body = $('summaryBody');
@@ -706,7 +712,7 @@ async function loadBranches() {
   await updateBranchOptions();
 }
 
-async function updateBranchOptions() {
+async function updateBranchOptions(loadData = true) {
   const branchSelect = $('branch');
   if ($('businessName').value === 'ALL' && $('locationType').value === 'ALL') return;
   const currentOption = branchSelect.selectedOptions[0];
@@ -749,8 +755,10 @@ async function updateBranchOptions() {
     || options.find(option => option.branch === currentBranch)
     || options[0];
   branchSelect.value = selection.value;
-  await loadBranch();
-  if (!$('summary').classList.contains('hidden')) await loadSummary();
+  if (loadData) {
+    await loadBranch();
+    if (!$('summary').classList.contains('hidden')) await loadSummary();
+  }
 }
 
 function updateLocationTypeOptions() {
