@@ -381,10 +381,17 @@ async function loadMatrix() {
 
 function showTab(tab) {
   ['daily', 'matrix', 'inactive', 'summary'].forEach(id => $(id).classList.toggle('hidden', id !== tab));
+  $('employeeSearchRow').classList.toggle('hidden', tab === 'summary');
   document.querySelectorAll('.tab[data-tab]').forEach(button =>
     button.classList.toggle('active', button.dataset.tab === tab)
   );
+  $('exportPdf').classList.toggle('hidden', tab !== 'daily');
+  $('exportAll').classList.toggle('hidden', tab !== 'daily');
+  $('exportMatrixPdf').classList.toggle('hidden', tab !== 'matrix');
+  $('exportInactivePdf').classList.toggle('hidden', tab !== 'inactive');
+  $('exportSummaryPdf').classList.toggle('hidden', tab !== 'summary');
   if (tab === 'matrix') loadMatrix();
+  if (tab === 'summary') loadSummary();
   filterVisibleRows();
 }
 
@@ -397,15 +404,154 @@ const bind = (id, event, handler) => {
 };
 bind('branch', 'onchange', () => {
   $('date').value = '';
-  loadBranch();
+  loadBranch().then(() => {
+    if (!$('summary').classList.contains('hidden')) loadSummary();
+  });
+});
+bind('locationType', 'onchange', () => {
+  if ($('businessName').value === 'ALL') allBusinessType = $('locationType').value;
+  else selectedLocationType = $('locationType').value;
+  updateBranchOptions().then(() => {
+    if (!$('summary').classList.contains('hidden')) loadSummary();
+  });
+});
+bind('businessName', 'onchange', () => {
+  updateLocationTypeOptions();
+  updateBranchOptions().then(() => {
+    if (!$('summary').classList.contains('hidden')) loadSummary();
+  });
 });
 bind('date', 'onchange', () => {
   setMonthRange();
   renderDaily();
   renderMatrix();
+  if (!$('summary').classList.contains('hidden')) loadSummary();
 });
 bind('from', 'onchange', renderMatrix);
 bind('to', 'onchange', renderMatrix);
+bind('exportSummaryPdf', 'onclick', exportSummaryPdf);
+
+async function loadSummary() {
+  const body = $('summaryBody');
+  body.innerHTML = '<tr><td colspan="7" class="empty">Loading...</td></tr>';
+  try {
+    const businessNameAll = $('businessName').value === 'ALL';
+    const selectedBusiness = $('businessName').value;
+    const locationType = $('locationType').value;
+    const selectedBusinessType = businessNameAll ? locationType : selectedBusiness;
+    const allBusinesses = businessNameAll && selectedBusinessType === 'ALL';
+    const businesses = allBusinesses ? BUSINESS_ORDER : [selectedBusinessType];
+    const available = await api('/api/branches');
+    const availableByName = new Map(available.map(branch => [branch.toUpperCase(), branch]));
+    const selectedSource = String($('branch').selectedOptions[0]?.dataset.source || $('branch').value || '').toUpperCase();
+    const groupSpecs = [];
+
+    businesses.forEach(business => {
+      const branchSources = (BUSINESS_BRANCHES[business] || []).map(branch => branchSourceName(business, branch));
+      const officeSources = business === 'MAGNUS'
+        ? CORE_OFFICES[business].map(branch => CORE_OFFICE_SOURCE_ALIASES[branch])
+        : [];
+      if (business === 'MAGNUS') {
+        if (businessNameAll || locationType === 'branch')
+          groupSpecs.push({ label: 'MAGNUS: BRANCH', sources: branchSources });
+        if (businessNameAll || locationType === 'core-office')
+          groupSpecs.push({ label: 'MAGNUS: CORE OFFICE', sources: officeSources });
+      } else {
+        groupSpecs.push({ label: business, sources: branchSources });
+      }
+    });
+
+    const scopedGroups = groupSpecs.map(group => ({
+      ...group,
+      sources: group.sources
+        .map(source => availableByName.get(source.toUpperCase()))
+        .filter(source => source && source.toUpperCase() === selectedSource)
+    })).filter(group => group.sources.length);
+    const branches = [...new Set(scopedGroups.flatMap(group => group.sources))];
+    const all = await Promise.all(branches.map(async branch => ({
+      branch,
+      data: await api('/api/data', { branch }, { cache: false })
+    })));
+    const date = $('date').value || all.flatMap(item => item.data.map(row => row.d)).sort().pop() || '';
+    const selectedScope = allBusinesses
+      ? 'ALL BUSINESSES'
+      : selectedBusinessType === 'MAGNUS'
+        ? businessNameAll ? 'MAGNUS' : `MAGNUS: ${locationType === 'core-office' ? 'CORE OFFICE' : 'BRANCH'}`
+        : selectedBusinessType;
+    $('summaryHint').textContent = date ? `Attendance summary for ${dmy(date)} (${selectedScope})` : '';
+
+    const matrices = await Promise.all(all.map(async item => ({
+      ...item,
+      matrix: await api('/api/summary-matrix', { branch: item.branch }, { cache: false })
+    })));
+    const rowsByBranch = new Map();
+    matrices.forEach(({ branch, data, matrix }) => {
+      const employees = [...new Map(data.map(row => [employeeIdentity(row), row])).values()];
+      const day = new Map(data.filter(row => row.d === date).map(row => [employeeIdentity(row), row]));
+      const matrixWithCodes = addEmployeeCodes(matrix, data);
+      const statusByIdentity = new Map(matrixWithCodes.rows.map(row => [employeeIdentity(row), row.statuses || {}]));
+      const excluded = employee => {
+        const statuses = statusByIdentity.get(employeeIdentity(employee));
+        return Boolean(statuses) && matrix.dates.length === 4
+          && matrix.dates.every(dayValue => statuses[dayValue] === 'A');
+      };
+      const included = employees.filter(employee => !excluded(employee));
+      const cnt = { P: 0, H: 0 };
+      let work = 0;
+      included.forEach(employee => {
+        const result = analyse(day.get(employeeIdentity(employee)));
+        if (result.st === 'P') cnt.P++;
+        else if (result.st === 'H') cnt.H++;
+        work += result.work;
+      });
+      const total = included.length;
+      rowsByBranch.set(branch.toUpperCase(), {
+        branch, total, work, present: cnt.P, half: cnt.H, absent: total - cnt.P - cnt.H
+      });
+    });
+
+    const visibleGroups = scopedGroups.map(group => ({
+      label: group.label,
+      rows: group.sources.map(source => rowsByBranch.get(source.toUpperCase())).filter(Boolean)
+    })).filter(group => group.rows.length);
+    const includedRows = [...new Map(visibleGroups.flatMap(group => group.rows).map(row => [row.branch, row])).values()];
+    const total = { employees: 0, work: 0, present: 0, half: 0, absent: 0 };
+    includedRows.forEach(row => {
+      total.employees += row.total;
+      total.work += row.work;
+      total.present += row.present;
+      total.half += row.half;
+      total.absent += row.absent;
+    });
+
+    let serial = 0;
+    let html = visibleGroups.map(group => {
+      const subtotal = { employees: 0, work: 0, present: 0, half: 0, absent: 0 };
+      group.rows.forEach(row => {
+        subtotal.employees += row.total;
+        subtotal.work += row.work;
+        subtotal.present += row.present;
+        subtotal.half += row.half;
+        subtotal.absent += row.absent;
+      });
+      const businessRow = `<tr class="business-row"><td></td><td>${esc(group.label)}</td>
+        <td>${subtotal.employees}</td><td>${subtotal.present}</td><td>${subtotal.half}</td><td>${subtotal.absent}</td><td>${fmtHM(subtotal.work)}</td></tr>`;
+      const branchRows = group.rows.map(row => `<tr><td>${++serial}</td><td class="name summary-branch">${esc(row.branch)}</td>
+        <td>${row.total}</td><td>${row.present}</td><td>${row.half}</td><td>${row.absent}</td><td>${fmtHM(row.work)}</td></tr>`).join('');
+      return businessRow + branchRows;
+    }).join('');
+    if (includedRows.length)
+      html += `<tr class="total-row"><td></td><td>TOTAL</td><td>${total.employees}</td><td>${total.present}</td><td>${total.half}</td><td>${total.absent}</td><td>${fmtHM(total.work)}</td></tr>`;
+    body.innerHTML = html || '<tr><td colspan="7" class="empty">No data</td></tr>';
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="7" class="empty">Error: ${esc(e.message || e)}</td></tr>`;
+  }
+}
+
+async function exportSummaryPdf() {
+  const title = `Overall Summary${$('summaryHint').textContent ? ` - ${$('summaryHint').textContent}` : ''}`;
+  await exportTablePdf('summaryTable', title, 'overall-summary.pdf', { landscape: true, theme: 'summary' });
+}
 
 async function loadBranches() {
   availableBranches = await api('/api/branches');
@@ -456,6 +602,7 @@ async function updateBranchOptions() {
     || options[0];
   branchSelect.value = selection.value;
   await loadBranch();
+  if (!$('summary').classList.contains('hidden')) await loadSummary();
 }
 
 function updateLocationTypeOptions() {

@@ -122,6 +122,46 @@ def create_app():
         except Exception as e:
             return jsonify({"error": str(e)})
 
+    @app.get("/api/summary-matrix")
+    @auth.login_required
+    def summary_matrix():
+        user = auth.current_user()
+        branch = request.args.get("branch", "")
+        if not auth.can_view_tab(user, "summary") or not auth.branch_allowed(user, branch):
+            return _deny()
+        try:
+            matrix = sheets_sync.get_saved_matrix(branch)
+            latest_status_date = max(
+                (
+                    day
+                    for row in matrix.get("rows", [])
+                    for day, status in row.get("statuses", {}).items()
+                    if status in ("P", "H", "A")
+                ),
+                default="",
+            )
+            if not latest_status_date:
+                return jsonify({"dates": [], "rows": []})
+            target = datetime.strptime(latest_status_date, "%Y-%m-%d").date()
+            dates = [(target - timedelta(days=offset)).isoformat() for offset in range(3, -1, -1)]
+            return jsonify({
+                "dates": dates,
+                "rows": [
+                    {
+                        "name": row.get("name", ""),
+                        "code": row.get("code", ""),
+                        "statuses": {
+                            day: row.get("statuses", {}).get(day, "")
+                            for day in dates
+                        },
+                    }
+                    for row in matrix.get("rows", [])
+                ],
+            })
+        except Exception as e:
+            log.exception("Summary matrix fetch failed")
+            return jsonify({"error": str(e)}), 500
+
     @app.get("/api/sync")
     @auth.roles_required("developer", "admin")          # writes to the output sheet
     def sync_now():
