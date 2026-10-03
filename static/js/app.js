@@ -33,7 +33,7 @@ window.addEventListener('load', async () => {
   );
   if (!permissions.download) $('exportActions').classList.add('hidden');
   if (!permissions.change_date) {
-    ['date', 'from', 'to', 'inactiveStartDate'].forEach(id => {
+    ['date', 'from', 'to'].forEach(id => {
       const element = $(id);
       if (element) element.disabled = true;
     });
@@ -129,9 +129,13 @@ function clearApiCache() {
 }
 
 async function api(path, params, options = {}) {
-  const query = params
-    ? new URLSearchParams(Object.entries(params).sort(([a], [b]) => a.localeCompare(b))).toString()
-    : '';
+  const search = new URLSearchParams();
+  if (params) {
+    Object.entries(params).sort(([a], [b]) => a.localeCompare(b)).forEach(([key, value]) => {
+      (Array.isArray(value) ? value : [value]).forEach(item => search.append(key, item));
+    });
+  }
+  const query = search.toString();
   const url = API_URL + path + (query ? '?' + query : '');
   const useCache = options.cache !== false;
   const force = options.force === true;
@@ -198,6 +202,54 @@ let names = [];
 let availableBranches = [];
 let allBusinessType = 'MAGNUS';
 let selectedLocationType = 'branch';
+let matrixLoadSequence = 0;
+const attendanceMatrices = new Map();
+
+async function loadAttendanceMatrix(branch, force = false) {
+  const key = String(branch || '').toUpperCase();
+  if (!key) throw new Error('A branch is required to load attendance history.');
+  if (!force && attendanceMatrices.has(key)) return attendanceMatrices.get(key);
+
+  const matrix = await api('/api/attendance-matrix', { branch }, { cache: false });
+  if (!matrix || !Array.isArray(matrix.dates) || !Array.isArray(matrix.rows))
+    throw new Error(`Invalid attendance matrix for ${branch}.`);
+  attendanceMatrices.set(key, matrix);
+  return matrix;
+}
+
+async function loadAttendanceMatrices(branches) {
+  if (!branches.length) return {};
+  const matrices = await api('/api/attendance-matrices', { branch: branches });
+  const result = {};
+  branches.forEach(branch => {
+    const matrix = matrices[branch];
+    if (!matrix || !Array.isArray(matrix.dates) || !Array.isArray(matrix.rows))
+      throw new Error(`Invalid attendance matrix for ${branch}.`);
+    attendanceMatrices.set(branch.toUpperCase(), matrix);
+    result[branch] = matrix;
+  });
+  return result;
+}
+
+function findInactiveEmployees(matrix, nDays = 4) {
+  const dates = (matrix.dates || [])
+    .filter(day => (matrix.rows || []).some(row => String(row.statuses?.[day] || '').trim()))
+    .sort();
+  if (dates.length < nDays) return [];
+
+  const latestDates = dates.slice(-nDays);
+  return matrix.rows.filter(row => latestDates.every(day =>
+    String(row.statuses?.[day] || '').trim().toUpperCase() === 'A'
+  ));
+}
+
+function inactiveEmployeeKeys(branch, sourceRows = [], nDays = 4) {
+  const matrix = attendanceMatrices.get(String(branch || '').toUpperCase());
+  if (!matrix) return null;
+  const inactiveRows = findInactiveEmployees(matrix, nDays);
+  const normalized = addEmployeeCodes({ ...matrix, rows: inactiveRows }, sourceRows);
+  return new Set(normalized.rows.map(employeeIdentity));
+}
 
 function indexRows() {
   byKey = new Map();
@@ -224,9 +276,7 @@ function addEmployeeCodes(matrix, sourceRows) {
   const uniqueRows = new Map();
   (matrix.rows || []).forEach(row => {
     const nameKey = String(row.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const code = row.code !== undefined
-      ? String(row.code || '').trim()
-      : codeByName.get(nameKey) || '';
+    const code = String(row.code || '').trim() || codeByName.get(nameKey) || '';
     const key = code ? `code:${code.toUpperCase()}` : `name:${String(row.name || '').trim().toUpperCase()}`;
     const existing = uniqueRows.get(key);
     if (!existing) {
@@ -264,7 +314,7 @@ function renderDaily() {
     const out = a.outM != null
       ? fmt12(a.outM)
       : (a.inM != null ? '<span class="no-out">No out punch</span>' : '');
-    return `<tr class="${afterTwoPm ? 'after-2pm' : ''}">
+    return `<tr class="${afterTwoPm ? 'after-2pm' : ''}" data-employee-key="${esc(employee.key)}">
       <td>${i + 1}</td><td class="name">${esc(employee.name)}${employee.code ? ` <small>(${esc(employee.code)})</small>` : ''}</td>
       <td>${fmt12(a.inM)}</td>
       <td class="late">${late}</td>
@@ -321,10 +371,14 @@ function filterVisibleRows() {
   });
   if (activeView === 'daily') {
     const counts = { P: 0, H: 0, A: 0 };
+    const branch = $('branch').selectedOptions[0]?.dataset.source || $('branch').value;
+    const inactiveKeys = inactiveEmployeeKeys(branch, rows);
     table.querySelectorAll('tbody tr:not(.hidden)').forEach(row => {
+      if (inactiveKeys?.has(row.dataset.employeeKey)) return;
       const status = row.cells[7]?.textContent.trim();
       if (status in counts) counts[status]++;
     });
+    if (!inactiveKeys) counts.A = '—';
     $('cards').innerHTML = [['P', 'Present'], ['H', 'Half-day'], ['A', 'Absent']].map(([key, label]) =>
       `<div class="card"><div class="label">${label}</div><div class="value">${counts[key]}</div></div>`).join('');
   }
@@ -339,44 +393,58 @@ function setMonthRange() {
 }
 
 // ---------- Load ----------
+async function loadMatrix(sourceBranch) {
+  const branch = sourceBranch || $('branch').selectedOptions[0]?.dataset.source || $('branch').value;
+  if (!branch) return;
+
+  const requestId = ++matrixLoadSequence;
+  savedMatrix = { dates: [], rows: [] };
+  $('matrixTable').innerHTML = '<tbody><tr><td class="empty">Loading status matrix…</td></tr></tbody>';
+  try {
+    const matrix = await api('/api/matrix', { branch }, { cache: false });
+    const selected = $('branch').selectedOptions[0];
+    const currentBranch = selected?.dataset.source || $('branch').value;
+    if (requestId !== matrixLoadSequence || currentBranch !== branch) return;
+    savedMatrix = addEmployeeCodes(matrix, rows);
+    renderMatrix();
+  } catch (e) {
+    const selected = $('branch').selectedOptions[0];
+    const currentBranch = selected?.dataset.source || $('branch').value;
+    if (requestId !== matrixLoadSequence || currentBranch !== branch) return;
+    console.error('Status matrix could not be loaded:', e);
+    $('matrixTable').innerHTML =
+      `<tbody><tr><td class="empty">Could not load status matrix: ${esc(e.message || e)}</td></tr></tbody>`;
+    setMsg('Status matrix load failed: ' + (e.message || e), true);
+  }
+}
+
 async function loadBranch() {
   setMsg('Loading…');
   try {
     const selectedBranch = $('branch').selectedOptions[0];
     const sourceBranch = selectedBranch?.dataset.source || $('branch').value;
-    const [branchRows, branchMatrix] = await Promise.all([
-      api('/api/data', { branch: sourceBranch }),
-      api('/api/matrix', { branch: sourceBranch }).catch(error => {
-        console.error('Saved matrix could not be loaded:', error);
-        return { dates: [], rows: [] };
-      })
-    ]);
+    const branchRows = await api('/api/data', { branch: sourceBranch });
     rows = branchRows;
-    savedMatrix = addEmployeeCodes(branchMatrix, branchRows);
     indexRows();
+    let attendanceMatrixError = null;
+    try {
+      await loadAttendanceMatrix(sourceBranch, true);
+    } catch (error) {
+      attendanceMatrices.delete(sourceBranch.toUpperCase());
+      attendanceMatrixError = error;
+      console.error('Attendance history could not be loaded:', error);
+    }
     const latest = rows.map(r => r.d).sort().pop();
     if (!$('date').value || !rows.some(r => r.d === $('date').value))
       $('date').value = latest || new Date().toISOString().slice(0, 10);
     setMonthRange();
     renderDaily();
-    renderMatrix();
-    setMsg(`${rows.length} records · ${names.length} employees · updated ${new Date().toLocaleTimeString()}`);
+    if (!$('matrix').classList.contains('hidden')) await loadMatrix(sourceBranch);
+    setMsg(attendanceMatrixError
+      ? `Inactive status unavailable: ${attendanceMatrixError.message || attendanceMatrixError}`
+      : `${rows.length} records · ${names.length} employees · updated ${new Date().toLocaleTimeString()}`,
+    Boolean(attendanceMatrixError));
   } catch (e) { setMsg('Error: ' + (e.message || e), true); }
-}
-
-async function loadMatrix() {
-  const selectedBranch = $('branch').selectedOptions[0];
-  const sourceBranch = selectedBranch?.dataset.source || $('branch').value;
-  if (!sourceBranch) return;
-
-  try {
-    const matrix = await api('/api/matrix', { branch: sourceBranch }, { cache: false });
-    savedMatrix = addEmployeeCodes(matrix, rows);
-    renderMatrix();
-  } catch (e) {
-    $('matrixTable').innerHTML = `<tbody><tr><td class="empty">Could not load status matrix: ${esc(e.message || e)}</td></tr></tbody>`;
-    setMsg('Status matrix load failed: ' + (e.message || e), true);
-  }
 }
 
 function showTab(tab) {
@@ -468,10 +536,13 @@ async function loadSummary() {
         .filter(source => source && source.toUpperCase() === selectedSource)
     })).filter(group => group.sources.length);
     const branches = [...new Set(scopedGroups.flatMap(group => group.sources))];
-    const all = await Promise.all(branches.map(async branch => ({
-      branch,
-      data: await api('/api/data', { branch }, { cache: false })
-    })));
+    const [matrices, all] = await Promise.all([
+      loadAttendanceMatrices(branches),
+      Promise.all(branches.map(async branch => ({
+        branch,
+        data: await api('/api/data', { branch }, { cache: false })
+      })))
+    ]);
     const date = $('date').value || all.flatMap(item => item.data.map(row => row.d)).sort().pop() || '';
     const selectedScope = allBusinesses
       ? 'ALL BUSINESSES'
@@ -480,33 +551,23 @@ async function loadSummary() {
         : selectedBusinessType;
     $('summaryHint').textContent = date ? `Attendance summary for ${dmy(date)} (${selectedScope})` : '';
 
-    const matrices = await Promise.all(all.map(async item => ({
-      ...item,
-      matrix: await api('/api/summary-matrix', { branch: item.branch }, { cache: false })
-    })));
     const rowsByBranch = new Map();
-    matrices.forEach(({ branch, data, matrix }) => {
+    all.forEach(({ branch, data }) => {
       const employees = [...new Map(data.map(row => [employeeIdentity(row), row])).values()];
       const day = new Map(data.filter(row => row.d === date).map(row => [employeeIdentity(row), row]));
-      const matrixWithCodes = addEmployeeCodes(matrix, data);
-      const statusByIdentity = new Map(matrixWithCodes.rows.map(row => [employeeIdentity(row), row.statuses || {}]));
-      const excluded = employee => {
-        const statuses = statusByIdentity.get(employeeIdentity(employee));
-        return Boolean(statuses) && matrix.dates.length === 4
-          && matrix.dates.every(dayValue => statuses[dayValue] === 'A');
-      };
-      const included = employees.filter(employee => !excluded(employee));
-      const cnt = { P: 0, H: 0 };
+      const inactiveRows = findInactiveEmployees(matrices[branch]);
+      const normalizedInactiveRows = addEmployeeCodes({ ...matrices[branch], rows: inactiveRows }, data);
+      const inactiveKeys = new Set(normalizedInactiveRows.rows.map(employeeIdentity));
+      const activeEmployees = employees.filter(employee => !inactiveKeys.has(employeeIdentity(employee)));
+      const cnt = { P: 0, H: 0, A: 0 };
       let work = 0;
-      included.forEach(employee => {
+      activeEmployees.forEach(employee => {
         const result = analyse(day.get(employeeIdentity(employee)));
-        if (result.st === 'P') cnt.P++;
-        else if (result.st === 'H') cnt.H++;
+        cnt[result.st]++;
         work += result.work;
       });
-      const total = included.length;
       rowsByBranch.set(branch.toUpperCase(), {
-        branch, total, work, present: cnt.P, half: cnt.H, absent: total - cnt.P - cnt.H
+        branch, total: activeEmployees.length, work, present: cnt.P, half: cnt.H, absent: cnt.A
       });
     });
 
@@ -1183,9 +1244,7 @@ function addEmployeeCodes(matrix, sourceRows) {
   const uniqueRows = new Map();
   (matrix.rows || []).forEach(row => {
     const nameKey = String(row.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const code = row.code !== undefined
-      ? String(row.code || '').trim()
-      : codeByName.get(nameKey) || '';
+    const code = String(row.code || '').trim() || codeByName.get(nameKey) || '';
     const key = code ? `code:${code.toUpperCase()}` : `name:${String(row.name || '').trim().toUpperCase()}`;
     const existing = uniqueRows.get(key);
     if (!existing) {
@@ -1223,7 +1282,7 @@ function renderDaily() {
     const out = a.outM != null
       ? fmt12(a.outM)
       : (a.inM != null ? '<span class="no-out">No out punch</span>' : '');
-    return `<tr class="${afterTwoPm ? 'after-2pm' : ''}">
+    return `<tr class="${afterTwoPm ? 'after-2pm' : ''}" data-employee-key="${esc(employee.key)}">
       <td>${i + 1}</td><td class="name">${esc(employee.name)}${employee.code ? ` <small>(${esc(employee.code)})</small>` : ''}</td>
       <td>${fmt12(a.inM)}</td>
       <td class="late">${late}</td>
@@ -1235,6 +1294,7 @@ function renderDaily() {
 
   $('cards').innerHTML = [['P', 'Present'], ['H', 'Half-day'], ['A', 'Absent']].map(([k, l]) =>
     `<div class="card"><div class="label">${l}</div><div class="value">${cnt[k]}</div></div>`).join('');
+  filterVisibleRows();
 }
 
 // ---------- Matrix ----------
@@ -1276,13 +1336,27 @@ async function loadBranch() {
     const sourceBranch = selectedBranch?.dataset.source || $('branch').value;
     const [branchRows, branchMatrix] = await Promise.all([
       api('/api/data', { branch: sourceBranch }),
-      api('/api/matrix', { branch: sourceBranch }).catch(error => {
-        console.error('Saved matrix could not be loaded:', error);
-        return { dates: [], rows: [] };
+      api('/api/matrix', { branch: sourceBranch }, { cache: false }).catch(error => {
+        console.error('Status matrix could not be loaded:', error);
+        return null;
       })
     ]);
     rows = branchRows;
-    savedMatrix = addEmployeeCodes(branchMatrix, branchRows);
+    let matrixForInactive = branchMatrix;
+    let attendanceMatrixError = null;
+    if (!matrixForInactive || !Array.isArray(matrixForInactive.dates) || !Array.isArray(matrixForInactive.rows)) {
+      try {
+        matrixForInactive = await loadAttendanceMatrix(sourceBranch, true);
+      } catch (error) {
+        attendanceMatrices.delete(sourceBranch.toUpperCase());
+        attendanceMatrixError = error;
+        matrixForInactive = null;
+        console.error('Saved attendance history could not be loaded:', error);
+      }
+    } else {
+      attendanceMatrices.set(sourceBranch.toUpperCase(), matrixForInactive);
+    }
+    savedMatrix = addEmployeeCodes(matrixForInactive || { dates: [], rows: [] }, branchRows);
     indexRows();
     const latest = rows.map(r => r.d).sort().pop();
     if (!$('date').value || !rows.some(r => r.d === $('date').value))
@@ -1290,7 +1364,10 @@ async function loadBranch() {
     setMonthRange();
     renderDaily();
     renderMatrix();
-    setMsg(`${rows.length} records · ${names.length} employees · updated ${new Date().toLocaleTimeString()}`);
+    setMsg(attendanceMatrixError
+      ? `Inactive status unavailable: ${attendanceMatrixError.message || attendanceMatrixError}`
+      : `${rows.length} records · ${names.length} employees · updated ${new Date().toLocaleTimeString()}`,
+    Boolean(attendanceMatrixError));
   } catch (e) { setMsg('Error: ' + (e.message || e), true); }
 }
 
@@ -1759,12 +1836,8 @@ async function exportInactivePdf() {
   pdf.setFontSize(16);
   pdf.setTextColor(0, 0, 0);
   pdf.text(`Inactive Employees - ${branch}`, pageWidth / 2, 34, { align: 'center' });
-  pdf.setFont('Lora', 'normal');
-  pdf.setFontSize(9);
-  pdf.setTextColor(90, 90, 90);
-  pdf.text($('inactiveHint').textContent, pageWidth / 2, 52, { align: 'center' });
   pdf.autoTable({
-    startY: 66,
+    startY: 52,
     margin: { left: 32, right: 32 },
     head: [['EMPLOYEE CODE', 'EMPLOYEE NAME']],
     body,
@@ -1841,44 +1914,19 @@ async function exportSummaryPdf() {
 // ---------- Overall summary (selected business scope, selected date) ----------
 async function loadInactive() {
   const body = $('inactiveBody');
-  const startDate = $('inactiveStartDate').value;
-  const days = Math.max(1, Number.parseInt($('inactiveDays').value, 10) || 2);
+  const days = 4;
   body.innerHTML = '<tr><td colspan="2" class="empty">Loading inactive employees…</td></tr>';
   try {
-    const params = { n_days: String(days) };
-    if (startDate) params.start_date = startDate;
-    const inactiveByBranch = await api('/api/inactive', params);
-    const branchSelect = $('branch');
-    const knownBranches = new Set(
-      [...branchSelect.options].map(option => String(option.dataset.source || option.value).toUpperCase())
-    );
-    const coreOfficeMode = $('businessName').value !== 'ALL'
-      && $('locationType').value === 'core-office';
-    Object.keys(inactiveByBranch).forEach(branch => {
-      if (coreOfficeMode || knownBranches.has(branch.toUpperCase())) return;
-      const option = new Option(branch, branch);
-      option.dataset.source = branch;
-      option.dataset.business = '';
-      option.dataset.branch = branch;
-      branchSelect.add(option);
-      knownBranches.add(branch.toUpperCase());
-    });
-    const selectedOption = branchSelect.selectedOptions[0];
-    const selectedBranch = String(selectedOption?.dataset.source || branchSelect.value || '').toUpperCase();
-    $('inactiveHint').textContent = startDate
-      ? `Absent on ${days} archived dates from ${dmy(startDate)} onward.`
-      : `Absent on the latest ${days} archived dates.`;
-    const employees = Object.entries(inactiveByBranch)
-      .filter(([branch]) => branch.toUpperCase() === selectedBranch)
-      .flatMap(([, rows]) =>
-        rows.map(row => ({
-        code: row['EMPLOYEE CODE'] || '',
-        name: row['EMPLOYEE NAME'] || ''
-        }))
-      ).sort((a, b) => a.name.localeCompare(b.name));
+    const selectedOption = $('branch').selectedOptions[0];
+    const branch = selectedOption?.dataset.source || $('branch').value;
+    const matrix = await loadAttendanceMatrix(branch);
+    const employees = addEmployeeCodes({
+      ...matrix,
+      rows: findInactiveEmployees(matrix, days)
+    }, rows).rows.sort((a, b) => a.name.localeCompare(b.name));
     body.innerHTML = employees.map(row => `<tr>
       <td>${esc(row.code)}</td><td class="name">${esc(row.name)}</td>
-    </tr>`).join('') || `<tr><td colspan="2" class="empty">No inactive employees found for ${days} archived dates.</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="2" class="empty">No employees were absent on the latest ${days} populated attendance dates.</td></tr>`;
     filterVisibleRows();
   } catch (e) {
     body.innerHTML = `<tr><td colspan="2" class="empty">Error: ${esc(e.message || e)}</td></tr>`;
@@ -1896,7 +1944,13 @@ async function loadSummary() {
     const allBusinesses = businessNameAll && selectedBusinessType === 'ALL';
     const businesses = allBusinesses ? BUSINESS_ORDER : [selectedBusinessType];
     const branches = await api('/api/branches');
-    const all = await Promise.all(branches.map(async b => ({ branch: b, data: await api('/api/data', { branch: b }) })));
+    const [, all] = await Promise.all([
+      loadAttendanceMatrices(branches),
+      Promise.all(branches.map(async branch => ({
+        branch,
+        data: await api('/api/data', { branch })
+      })))
+    ]);
     const date = $('date').value || all.flatMap(x => x.data.map(r => r.d)).sort().pop() || '';
     const selectedScope = allBusinesses
       ? 'ALL BUSINESSES'
@@ -1908,16 +1962,18 @@ async function loadSummary() {
     // Uses the same analyse() as the Daily Report, so the two views can never disagree.
     const rowsByBranch = new Map(await Promise.all(all.map(async ({ branch, data }) => {
       const employees = [...new Map(data.map(row => [employeeIdentity(row), row])).values()];
+      const inactiveKeys = inactiveEmployeeKeys(branch, data) || new Set();
+      const activeEmployees = employees.filter(employee => !inactiveKeys.has(employeeIdentity(employee)));
       const day = new Map(data.filter(row => row.d === date).map(row => [employeeIdentity(row), row]));
       const cnt = { P: 0, H: 0, A: 0 };
       let work = 0;
-      employees.forEach(employee => {
+      activeEmployees.forEach(employee => {
         const a = analyse(day.get(employeeIdentity(employee)));
         cnt[a.st]++;
         work += a.work;
       });
       return [branch.toUpperCase(), {
-        branch, total: employees.length, work, present: cnt.P, absent: cnt.A, half: cnt.H
+        branch, total: activeEmployees.length, work, present: cnt.P, absent: cnt.A, half: cnt.H
       }];
     })));
     const groups = [];
@@ -1984,7 +2040,7 @@ function applyRole(me) {
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('hidden', !perms.tabs.includes(b.dataset.tab)));
   if (!perms.download) $('exportActions').classList.add('hidden');
   if (!perms.change_date) {
-    ['date', 'from', 'to', 'inactiveStartDate'].forEach(id => {
+    ['date', 'from', 'to'].forEach(id => {
       const el = $(id);
       if (el) { el.disabled = true; el.title = 'Date changing is not enabled for your account'; }
     });
@@ -2001,6 +2057,7 @@ function showTab(t) {
   $('exportMatrixPdf').classList.toggle('hidden', t !== 'matrix');
   $('exportInactivePdf').classList.toggle('hidden', t !== 'inactive');
   $('exportSummaryPdf').classList.toggle('hidden', t !== 'summary');
+  if (t === 'matrix') loadMatrix();
   if (t === 'inactive') loadInactive();
   if (t === 'summary') loadSummary();
   filterVisibleRows();
@@ -2054,7 +2111,6 @@ on('refresh', 'onclick', async () => {
     button.disabled = false;
   }
 });
-on('inactiveUpdate', 'onclick', loadInactive);
 on('sync', 'onclick', syncSheet);
 on('exportPdf', 'onclick', exportBranchPdf);
 on('exportAll', 'onclick', exportAllPdf);
@@ -2098,7 +2154,7 @@ window.addEventListener('error', e => setMsg('Script error: ' + e.message, true)
   );
   if (!permissions.download) $('exportActions').classList.add('hidden');
   if (!permissions.change_date) {
-    ['date', 'from', 'to', 'inactiveStartDate'].forEach(id => {
+    ['date', 'from', 'to'].forEach(id => {
       const element = $(id);
       if (element) element.disabled = true;
     });
@@ -2146,12 +2202,8 @@ window.addEventListener('error', e => setMsg('Script error: ' + e.message, true)
   pdf.setFontSize(16);
   pdf.setTextColor(0, 0, 0);
   pdf.text(`Inactive Employees - ${branch}`, pageWidth / 2, 34, { align: 'center' });
-  pdf.setFont('Lora', 'normal');
-  pdf.setFontSize(9);
-  pdf.setTextColor(90, 90, 90);
-  pdf.text($('inactiveHint').textContent, pageWidth / 2, 52, { align: 'center' });
   pdf.autoTable({
-    startY: 66,
+    startY: 52,
     margin: { left: 32, right: 32 },
     head: [['EMPLOYEE CODE', 'EMPLOYEE NAME']],
     body,
@@ -2228,44 +2280,23 @@ async function exportSummaryPdf() {
 // ---------- Overall summary (selected business scope, selected date) ----------
 async function loadInactive() {
   const body = $('inactiveBody');
-  const startDate = $('inactiveStartDate').value;
-  const days = Math.max(1, Number.parseInt($('inactiveDays').value, 10) || 2);
+  const days = 4;
   body.innerHTML = '<tr><td colspan="2" class="empty">Loading inactive employees…</td></tr>';
   try {
-    const params = { n_days: String(days) };
-    if (startDate) params.start_date = startDate;
-    const inactiveByBranch = await api('/api/inactive', params);
-    const branchSelect = $('branch');
-    const knownBranches = new Set(
-      [...branchSelect.options].map(option => String(option.dataset.source || option.value).toUpperCase())
-    );
-    const coreOfficeMode = $('businessName').value !== 'ALL'
-      && $('locationType').value === 'core-office';
-    Object.keys(inactiveByBranch).forEach(branch => {
-      if (coreOfficeMode || knownBranches.has(branch.toUpperCase())) return;
-      const option = new Option(branch, branch);
-      option.dataset.source = branch;
-      option.dataset.business = '';
-      option.dataset.branch = branch;
-      branchSelect.add(option);
-      knownBranches.add(branch.toUpperCase());
-    });
-    const selectedOption = branchSelect.selectedOptions[0];
-    const selectedBranch = String(selectedOption?.dataset.source || branchSelect.value || '').toUpperCase();
-    $('inactiveHint').textContent = startDate
-      ? `Absent on ${days} archived dates from ${dmy(startDate)} onward.`
-      : `Absent on the latest ${days} archived dates.`;
-    const employees = Object.entries(inactiveByBranch)
-      .filter(([branch]) => branch.toUpperCase() === selectedBranch)
-      .flatMap(([, rows]) =>
-        rows.map(row => ({
-        code: row['EMPLOYEE CODE'] || '',
-        name: row['EMPLOYEE NAME'] || ''
-        }))
-      ).sort((a, b) => a.name.localeCompare(b.name));
+    const selectedOption = $('branch').selectedOptions[0];
+    const branch = selectedOption?.dataset.source || $('branch').value;
+    const matrix = await loadAttendanceMatrix(branch);
+    const sourceRows = String($('branch').selectedOptions[0]?.dataset.source || $('branch').value || '').toUpperCase() === branch.toUpperCase()
+      ? rows
+      : [];
+    const employees = addEmployeeCodes({
+      ...matrix,
+      rows: findInactiveEmployees(matrix, days)
+    }, sourceRows).rows.sort((a, b) => a.name.localeCompare(b.name));
     body.innerHTML = employees.map(row => `<tr>
       <td>${esc(row.code)}</td><td class="name">${esc(row.name)}</td>
-    </tr>`).join('') || `<tr><td colspan="2" class="empty">No inactive employees found for ${days} archived dates.</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="2" class="empty">No employees were absent on the latest ${days} populated attendance dates.</td></tr>`;
+    filterVisibleRows();
   } catch (e) {
     body.innerHTML = `<tr><td colspan="2" class="empty">Error: ${esc(e.message || e)}</td></tr>`;
   }
@@ -2282,7 +2313,13 @@ async function loadSummary() {
     const allBusinesses = businessNameAll && selectedBusinessType === 'ALL';
     const businesses = allBusinesses ? BUSINESS_ORDER : [selectedBusinessType];
     const branches = await api('/api/branches');
-    const all = await Promise.all(branches.map(async b => ({ branch: b, data: await api('/api/data', { branch: b }) })));
+    const [, all] = await Promise.all([
+      loadAttendanceMatrices(branches),
+      Promise.all(branches.map(async branch => ({
+        branch,
+        data: await api('/api/data', { branch })
+      })))
+    ]);
     const date = $('date').value || all.flatMap(x => x.data.map(r => r.d)).sort().pop() || '';
     const selectedScope = allBusinesses
       ? 'ALL BUSINESSES'
@@ -2294,16 +2331,18 @@ async function loadSummary() {
     // Uses the same analyse() as the Daily Report, so the two views can never disagree.
     const rowsByBranch = new Map(await Promise.all(all.map(async ({ branch, data }) => {
       const employees = [...new Map(data.map(row => [employeeIdentity(row), row])).values()];
+      const inactiveKeys = inactiveEmployeeKeys(branch, data) || new Set();
+      const activeEmployees = employees.filter(employee => !inactiveKeys.has(employeeIdentity(employee)));
       const day = new Map(data.filter(row => row.d === date).map(row => [employeeIdentity(row), row]));
       const cnt = { P: 0, H: 0, A: 0 };
       let work = 0;
-      employees.forEach(employee => {
+      activeEmployees.forEach(employee => {
         const a = analyse(day.get(employeeIdentity(employee)));
         cnt[a.st]++;
         work += a.work;
       });
       return [branch.toUpperCase(), {
-        branch, total: employees.length, work, present: cnt.P, absent: cnt.A, half: cnt.H
+        branch, total: activeEmployees.length, work, present: cnt.P, absent: cnt.A, half: cnt.H
       }];
     })));
     const groups = [];
@@ -2410,7 +2449,6 @@ on('refresh', 'onclick', async () => {
     button.disabled = false;
   }
 });
-on('inactiveUpdate', 'onclick', loadInactive);
 on('sync', 'onclick', syncSheet);
 on('exportPdf', 'onclick', exportBranchPdf);
 on('exportAll', 'onclick', exportAllPdf);

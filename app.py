@@ -30,9 +30,6 @@ from config import Config
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("attendance")
 
-from inaactive import INACTIVE
-
-
 def _compress_json_response(response):
     """Gzip sizeable JSON API responses when the client supports it."""
     if (
@@ -73,6 +70,10 @@ def create_app():
 
     def _deny(msg="You do not have access to this report."):
         return jsonify({"error": msg}), 403
+
+    def _empty_matrix_for_branch(branch):
+        skipped = {name.casefold() for name in sheets_sync.OUTPUT_SKIP_TABS}
+        return {"dates": [], "rows": []} if branch.casefold() in skipped else None
 
     @app.get("/api/branches")
     @auth.login_required
@@ -115,7 +116,10 @@ def create_app():
         if not auth.can_view_tab(user, "matrix") or not auth.branch_allowed(user, branch):
             return _deny()
         try:
-            result = sheets_sync.get_saved_matrix(branch)
+            empty_matrix = _empty_matrix_for_branch(branch)
+            if empty_matrix is not None:
+                return jsonify(empty_matrix)
+            result = sheets_sync.get_current_matrix(branch)
             if not auth.can_change_date(user):
                 result = auth.limit_matrix_to_latest_month(result)
             return jsonify(result)
@@ -130,6 +134,9 @@ def create_app():
         if not auth.can_view_tab(user, "summary") or not auth.branch_allowed(user, branch):
             return _deny()
         try:
+            empty_matrix = _empty_matrix_for_branch(branch)
+            if empty_matrix is not None:
+                return jsonify(empty_matrix)
             matrix = sheets_sync.get_saved_matrix(branch)
             latest_status_date = max(
                 (
@@ -162,6 +169,49 @@ def create_app():
             log.exception("Summary matrix fetch failed")
             return jsonify({"error": str(e)}), 500
 
+    @app.get("/api/attendance-matrix")
+    @auth.login_required
+    def attendance_matrix():
+        user = auth.current_user()
+        branch = request.args.get("branch", "")
+        if (
+            not auth.can_view_tab(user, "daily", "summary", "inactive")
+            or not auth.branch_allowed(user, branch)
+        ):
+            return _deny()
+        try:
+            empty_matrix = _empty_matrix_for_branch(branch)
+            if empty_matrix is not None:
+                return jsonify(empty_matrix)
+            return jsonify(sheets_sync.get_saved_matrix(branch))
+        except Exception as e:
+            log.exception("Attendance matrix fetch failed")
+            return jsonify({"error": str(e)}), 500
+
+    @app.get("/api/attendance-matrices")
+    @auth.login_required
+    def attendance_matrices():
+        user = auth.current_user()
+        branches = list(dict.fromkeys(request.args.getlist("branch")))
+        if not auth.can_view_tab(user, "summary") or any(
+            not auth.branch_allowed(user, branch) for branch in branches
+        ):
+            return _deny()
+        try:
+            matrices = {}
+            output_branches = []
+            for branch in branches:
+                empty_matrix = _empty_matrix_for_branch(branch)
+                if empty_matrix is None:
+                    output_branches.append(branch)
+                else:
+                    matrices[branch] = empty_matrix
+            matrices.update(sheets_sync.get_saved_matrices(output_branches))
+            return jsonify(matrices)
+        except Exception as e:
+            log.exception("Attendance matrices fetch failed")
+            return jsonify({"error": str(e)}), 500
+
     @app.get("/api/sync")
     @auth.roles_required("developer", "admin")          # writes to the output sheet
     def sync_now():
@@ -171,27 +221,6 @@ def create_app():
         except Exception as e:
             log.exception("Manual sync failed")
             return jsonify({"error": str(e)})
-
-    @app.route("/api/inactive", methods=["GET"])
-    @auth.login_required
-    def inactive():
-        user = auth.current_user()
-        if not auth.can_view_tab(user, "inactive"):
-            return _deny()
-        try:
-            start_date = request.args.get("start_date") if auth.can_change_date(user) else None
-            inactive_data = INACTIVE.get_inactive(
-                start_date=start_date,
-                n_days=request.args.get("n_days", default=2, type=int),
-            )
-            return jsonify({
-                branch: frame.to_dict(orient="records")
-                for branch, frame in inactive_data.items()
-                if auth.branch_allowed(user, branch)
-            })
-        except Exception as e:
-            log.exception("Inactive fetch failed")
-            return jsonify({"error": str(e)}), 500
 
     return app
 

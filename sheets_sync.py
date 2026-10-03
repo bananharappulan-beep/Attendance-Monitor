@@ -562,3 +562,30 @@ def get_saved_matrices(branches):
 def get_saved_matrix(branch):
     """Read one branch's saved status matrix from the OUTPUT spreadsheet."""
     return get_saved_matrices([branch])[branch]
+
+
+def get_current_matrix(branch):
+    """Read saved history and overlay statuses from a fresh source-sheet fetch."""
+    global _cache
+    with _sync_lock:
+        source = fetch_source()
+        with _cache_lock:
+            _cache = source
+
+        result = _sheets_call(
+            lambda client: client.open_by_key(Config.OUTPUT_SHEET_ID).values_batch_get(
+                ranges=[_quote(branch)],
+                params={"valueRenderOption": "FORMATTED_VALUE"},
+            )
+        )
+        value_ranges = result.get("valueRanges", [])
+        values = value_ranges[0].get("values", []) if value_ranges else []
+        saved, header_dates = parse_existing(values)
+        matrix = build_matrix(
+            source.get(branch, []),
+            saved,
+            header_dates,
+            branch=branch,
+            all_source=source,
+        )
+        return _parse_saved_matrix(branch, matrix, source)

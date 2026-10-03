@@ -62,8 +62,10 @@ this cache; sync requests themselves are never cached.
 |---|---|
 | `GET /api/branches` | List of branches |
 | `GET /api/data?branch=NAME` | Attendance rows for a branch |
+| `GET /api/matrix?branch=NAME` | Saved matrix history overlaid with the latest source-sheet attendance |
 | `GET /api/sync` | Re-read the source and save the matrix to the output sheet |
-| `GET /api/inactive` | Employees absent on the latest four archived dates |
+| `GET /api/attendance-matrix?branch=NAME` | Saved attendance history used by the frontend to identify inactive employees |
+| `GET /api/attendance-matrices?branch=NAME&branch=NAME` | Batch-read saved attendance history for summary reports |
 
 The source tabs need these header columns (tab name = branch):
 `Date`, `Employee Code`, `Employee Name`, `In Time`, `Out Time`.

@@ -1,3 +1,3 @@
-from inaactive import INACTIVE
+from inaactive import METRIX
 
-INACTIVE.get_inactive(start_date="29/9/2026", n_days=2)
+print(METRIX.get_metrix_dataframe())
