@@ -162,14 +162,14 @@ def start_scheduler():
     # APScheduler runs this sequence on its background executor.
     def daily_pipeline_job():
         try:
-            log.info("Daily pipeline step 1/2: archive yesterday")
+            log.info("Daily pipeline step 1/3: archive yesterday")
             sheets_sync.archive_yesterday()
         except Exception:
             log.exception("Daily archive failed; data fetch skipped")
             return
 
         try:
-            log.info("Daily pipeline step 2/2: fetch ESSL data")
+            log.info("Daily pipeline step 2/3: fetch ESSL data")
             result = subprocess.run(
                 [sys.executable, "-c", "import data_fetch; data_fetch.run()"],
                 cwd=str(Path(__file__).resolve().parent),
@@ -182,12 +182,22 @@ def start_scheduler():
             if result.returncode:
                 log.error("Data fetch failed (exit %s):\n%s",
                           result.returncode, (result.stderr or "")[-3000:])
-            else:
-                log.info("Data fetch finished")
+                return
+            log.info("Data fetch finished")
         except subprocess.TimeoutExpired:
             log.error("Data fetch timed out")
+            return
         except Exception:
             log.exception("Data fetch failed")
+            return
+
+        try:
+            log.info("Daily pipeline step 3/3: update status matrix")
+            rows, branches = sheets_sync.sync()
+            log.info("Status matrix updated after ESSL fetch: %d rows, %d branches",
+                     rows, branches)
+        except Exception:
+            log.exception("Status matrix update after ESSL fetch failed")
 
     scheduler.add_job(
         daily_pipeline_job,

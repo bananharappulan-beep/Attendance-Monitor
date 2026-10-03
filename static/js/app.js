@@ -364,6 +364,49 @@ async function loadBranch() {
   } catch (e) { setMsg('Error: ' + (e.message || e), true); }
 }
 
+async function loadMatrix() {
+  const selectedBranch = $('branch').selectedOptions[0];
+  const sourceBranch = selectedBranch?.dataset.source || $('branch').value;
+  if (!sourceBranch) return;
+
+  try {
+    const matrix = await api('/api/matrix', { branch: sourceBranch }, { cache: false });
+    savedMatrix = addEmployeeCodes(matrix, rows);
+    renderMatrix();
+  } catch (e) {
+    $('matrixTable').innerHTML = `<tbody><tr><td class="empty">Could not load status matrix: ${esc(e.message || e)}</td></tr></tbody>`;
+    setMsg('Status matrix load failed: ' + (e.message || e), true);
+  }
+}
+
+function showTab(tab) {
+  ['daily', 'matrix', 'inactive', 'summary'].forEach(id => $(id).classList.toggle('hidden', id !== tab));
+  document.querySelectorAll('.tab[data-tab]').forEach(button =>
+    button.classList.toggle('active', button.dataset.tab === tab)
+  );
+  if (tab === 'matrix') loadMatrix();
+  filterVisibleRows();
+}
+
+document.querySelectorAll('.tab[data-tab]').forEach(button =>
+  button.addEventListener('click', () => showTab(button.dataset.tab))
+);
+const bind = (id, event, handler) => {
+  const element = $(id);
+  if (element) element[event] = handler;
+};
+bind('branch', 'onchange', () => {
+  $('date').value = '';
+  loadBranch();
+});
+bind('date', 'onchange', () => {
+  setMonthRange();
+  renderDaily();
+  renderMatrix();
+});
+bind('from', 'onchange', renderMatrix);
+bind('to', 'onchange', renderMatrix);
+
 async function loadBranches() {
   availableBranches = await api('/api/branches');
   await updateBranchOptions();
