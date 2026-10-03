@@ -67,6 +67,41 @@ LOCATION_MAP = {
 # Report date = yesterday (run on the 30th -> 29th to 29th)
 report_day = date.today() - timedelta(days=1)
 D, M, Y = str(report_day.day), report_day.strftime("%b"), str(report_day.year)
+PROGRESS_FILE = BASE_DIR / ".data_fetch_progress.json"
+
+
+def _save_progress(remaining, fetch_complete=False):
+    state = {
+        "report_date": report_day.isoformat(),
+        "remaining": remaining,
+        "fetch_complete": fetch_complete,
+    }
+    temporary = PROGRESS_FILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(state), encoding="utf-8")
+    os.replace(temporary, PROGRESS_FILE)
+
+
+def _load_progress():
+    if not PROGRESS_FILE.exists():
+        return list(LOCATION_MAP), False
+    try:
+        state = json.loads(PROGRESS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"Could not read fetch progress file: {error}") from error
+
+    if state.get("report_date") != report_day.isoformat():
+        return list(LOCATION_MAP), False
+    if state.get("fetch_complete") is True:
+        return [], True
+
+    remaining = state.get("remaining")
+    if not isinstance(remaining, list) or any(
+        location not in LOCATION_MAP for location in remaining
+    ):
+        raise RuntimeError("Fetch progress file contains an invalid remaining-location list.")
+    if not remaining:
+        raise RuntimeError("Fetch progress file has no locations but is not marked complete.")
+    return list(dict.fromkeys(remaining)), True
 
 
 def open_report_form(page):
@@ -187,7 +222,20 @@ def push_to_sheet(spreadsheet, tab_name, df):
     ws.update(range_name="A1", values=values)    # then add the new data
     print(f"Sheet updated: {tab_name} ({len(df)} rows)")
 
-def run():
+def run(retain_progress=False):
+    pending_locations, resuming = _load_progress()
+    if resuming and not pending_locations:
+        print(f"Fetch for {report_day} is complete; resuming the status-matrix update.")
+        return
+    if resuming:
+        print(
+            f"Resuming fetch for {report_day}; {len(pending_locations)} location(s) remain: "
+            + ", ".join(pending_locations)
+        )
+    else:
+        print(f"Starting fetch for {report_day}; {len(pending_locations)} locations.")
+    _save_progress(pending_locations)
+
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     creds = (
         Credentials.from_service_account_info(GOOGLE_CREDS_INFO, scopes=scopes)
@@ -219,24 +267,39 @@ def run():
             print("Login done. Page:", page.url)
 
             failed_locations = []
-            for essl_loc, sheet_tab in LOCATION_MAP.items():
+            for essl_loc in list(pending_locations):
+                sheet_tab = LOCATION_MAP[essl_loc]
                 safe = re.sub(r"[^A-Za-z0-9]+", "_", essl_loc)
                 path = BASE_DIR / f"report_{safe}.csv"
+                print(f"Fetching {essl_loc} -> {sheet_tab}...", flush=True)
                 try:
                     download_for_location(page, essl_loc, str(path))
                     df = pd.read_csv(path)
                     print(f"{essl_loc} -> {sheet_tab}: {len(df)} rows for {report_day}")
                     push_to_sheet(spreadsheet, sheet_tab, df)
+                    pending_locations.remove(essl_loc)
+                    _save_progress(pending_locations)
+                    print(f"Completed {essl_loc}.", flush=True)
                 except Exception:
                     failed_locations.append(essl_loc)
                     log.exception("Failed to fetch or upload ESSL report for %s", essl_loc)
+                    print(f"FAILED {essl_loc}; it will be retried.", flush=True)
                 finally:
                     path.unlink(missing_ok=True)
                     print("CSV removed:", path.name)
             if failed_locations:
+                _save_progress(failed_locations)
                 raise RuntimeError(
                     "ESSL data fetch failed for locations: "
                     + ", ".join(failed_locations)
                 )
         finally:
             browser.close()
+        _save_progress([], fetch_complete=True)
+        print(f"Fetch for {report_day} completed successfully.", flush=True)
+        if not retain_progress:
+            PROGRESS_FILE.unlink(missing_ok=True)
+
+
+if __name__ == "__main__":
+    run()

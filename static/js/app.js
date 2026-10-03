@@ -447,7 +447,94 @@ async function loadBranch() {
   } catch (e) { setMsg('Error: ' + (e.message || e), true); }
 }
 
+function appendSyncLog(message) {
+  const logElement = $('syncLog');
+  logElement.textContent += `${message}\n`;
+  logElement.scrollTop = logElement.scrollHeight;
+}
+
+function showDeveloperSyncPanel(action) {
+  ['daily', 'matrix', 'inactive', 'summary'].forEach(id => $(id).classList.add('hidden'));
+  $('syncPanel').classList.remove('hidden');
+  $('employeeSearchRow').classList.add('hidden');
+  document.querySelectorAll('.tab[data-tab]').forEach(button => button.classList.remove('active'));
+  document.querySelectorAll('.sync-action').forEach(button =>
+    button.classList.toggle('active', button.id === (action === 'archive' ? 'syncArchive' : 'syncFetchData'))
+  );
+  ['exportPdf', 'exportAll', 'exportMatrixPdf', 'exportInactivePdf', 'exportSummaryPdf']
+    .forEach(id => $(id).classList.add('hidden'));
+  $('syncTitle').textContent = action === 'archive' ? 'Archive Attendance' : 'Fetch Attendance Data';
+  $('syncLog').textContent = '';
+  $('syncStatus').className = 'sync-status';
+  $('syncStatus').textContent = action === 'archive' ? "Archiving yesterday's attendance..." : 'Starting the attendance fetch...';
+}
+
+async function runDeveloperSyncAction(action) {
+  showDeveloperSyncPanel(action);
+  const buttons = [$('syncArchive'), $('syncFetchData')];
+  buttons.forEach(button => { button.disabled = true; });
+  try {
+    if (action === 'archive') {
+      const result = await api('/api/developer/archive', null, { method: 'POST', cache: false });
+      appendSyncLog(result.message);
+      $('syncStatus').textContent = 'Archive completed.';
+      $('syncStatus').classList.add('success');
+      return;
+    }
+
+    const response = await fetch(API_URL + '/api/developer/fetch-data', {
+      method: 'POST',
+      headers: { Accept: 'text/event-stream' },
+      cache: 'no-store'
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || `Request failed (${response.status})`);
+    }
+    if (!response.body) throw new Error('This browser cannot stream fetch logs.');
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = '';
+    let completion = null;
+    const consume = block => {
+      if (!block.trim()) return;
+      const eventName = block.match(/^event:\s*(.+)$/m)?.[1];
+      const data = block.split(/\r?\n/)
+        .filter(line => line.startsWith('data:'))
+        .map(line => line.slice(5).trim())
+        .join('\n');
+      if (!data) return;
+      const payload = JSON.parse(data);
+      if (eventName === 'log') appendSyncLog(payload.message);
+      if (eventName === 'done') completion = payload;
+    };
+    while (true) {
+      const { value, done } = await reader.read();
+      pending += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const blocks = pending.split(/\r?\n\r?\n/);
+      pending = blocks.pop();
+      blocks.forEach(consume);
+      if (done) break;
+    }
+    consume(pending);
+    if (!completion) throw new Error('Fetch log stream ended without a completion status.');
+    $('syncStatus').textContent = completion.message;
+    $('syncStatus').classList.add(completion.ok ? 'success' : 'error');
+  } catch (error) {
+    $('syncStatus').textContent = error.message || String(error);
+    $('syncStatus').classList.add('error');
+    appendSyncLog(`ERROR: ${error.message || error}`);
+  } finally {
+    buttons.forEach(button => { button.disabled = false; });
+  }
+}
+
+window.runDeveloperSyncAction = runDeveloperSyncAction;
+
 function showTab(tab) {
+  $('syncPanel').classList.add('hidden');
+  document.querySelectorAll('.sync-action').forEach(button => button.classList.remove('active'));
   ['daily', 'matrix', 'inactive', 'summary'].forEach(id => $(id).classList.toggle('hidden', id !== tab));
   $('employeeSearchRow').classList.toggle('hidden', tab === 'summary');
   document.querySelectorAll('.tab[data-tab]').forEach(button =>
@@ -2048,6 +2135,8 @@ function applyRole(me) {
 }
 
 function showTab(t) {
+  $('syncPanel').classList.add('hidden');
+  document.querySelectorAll('.sync-action').forEach(button => button.classList.remove('active'));
   if (ME && !ME.permissions.tabs.includes(t)) return;
   ['daily', 'matrix', 'inactive', 'summary'].forEach(x => $(x).classList.toggle('hidden', x !== t));
   $('employeeSearchRow').classList.toggle('hidden', t === 'summary');
@@ -2388,6 +2477,8 @@ async function loadSummary() {
 }
 
 function showTab(t) {
+  $('syncPanel').classList.add('hidden');
+  document.querySelectorAll('.sync-action').forEach(button => button.classList.remove('active'));
   ['daily', 'matrix', 'inactive', 'summary'].forEach(x => $(x).classList.toggle('hidden', x !== t));
   $('employeeSearchRow').classList.toggle('hidden', t === 'summary');
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));

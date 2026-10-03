@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Attendance Monitor</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='5') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='7') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css', v='3') }}">
 </head>
 <body>
@@ -80,6 +80,18 @@
         <button data-tab="summary" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V9M12 19V5M19 19v-7"/></svg>Overall Summary</button>
         <button id="sidebarUsers" class="tab sidebar-admin hidden"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM19 8v6M22 11h-6"/></svg>Users &amp; Access</button>
       </nav>
+      <div id="developerSyncSection" class="developer-sync hidden">
+        <button id="syncSectionToggle" class="sidebar-section-toggle" type="button"
+                aria-expanded="false" aria-controls="syncSectionOptions">
+          <svg class="ui-icon sync-section-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10a4 4 0 0 1 4 4v1M20 17H10a4 4 0 0 1-4-4v-1M16 9l2 3 3-2M8 15l-2-3-3 2"/></svg>
+          <span>SYNC</span>
+          <svg class="ui-icon sync-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
+        <div id="syncSectionOptions" class="sync-section-options" hidden>
+          <button id="syncArchive" class="sync-action" type="button">Archive</button>
+          <button id="syncFetchData" class="sync-action" type="button">Fetch Data</button>
+        </div>
+      </div>
     </aside>
 
     <main class="workspace">
@@ -127,13 +139,18 @@
       </table>
     </div>
   </section>
+  <section id="syncPanel" class="sync-panel hidden" aria-live="polite">
+    <h2 id="syncTitle"></h2>
+    <p id="syncStatus" class="sync-status">Choose an action from the Sync menu.</p>
+    <pre id="syncLog" class="sync-log"></pre>
+  </section>
     </main>
   </div>
 
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="{{ url_for('static', filename='js/auth-ui.js', v='4') }}"></script>
-<script src="{{ url_for('static', filename='js/app.js', v='14') }}"></script>
+<script src="{{ url_for('static', filename='js/auth-ui.js', v='6') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='15') }}"></script>
 </body>
 </html>

@@ -68,6 +68,21 @@
       usersButton.classList.toggle('hidden', me.role !== 'developer');
       usersButton.onclick = openUsers;
     }
+    const syncSection = $('developerSyncSection');
+    syncSection?.classList.toggle('hidden', me.role !== 'developer');
+    const syncToggle = $('syncSectionToggle');
+    const syncOptions = $('syncSectionOptions');
+    if (syncToggle && syncOptions) {
+      syncToggle.onclick = () => {
+        const expanded = syncToggle.getAttribute('aria-expanded') === 'true';
+        syncToggle.setAttribute('aria-expanded', String(!expanded));
+        syncOptions.hidden = expanded;
+      };
+    }
+    const syncArchive = $('syncArchive');
+    const syncFetchData = $('syncFetchData');
+    if (syncArchive) syncArchive.onclick = () => window.runDeveloperSyncAction?.('archive');
+    if (syncFetchData) syncFetchData.onclick = () => window.runDeveloperSyncAction?.('fetch');
     $('ubPw').onclick = () => {
       userMenu.classList.add('hidden');
       userMenuToggle?.setAttribute('aria-expanded', 'false');

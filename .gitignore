@@ -14,6 +14,8 @@ env/
 # Flask / logs
 instance/
 *.log
+.data_fetch_progress.json
+.data_fetch_progress.tmp
 
 # IDE / OS
 .vscode/

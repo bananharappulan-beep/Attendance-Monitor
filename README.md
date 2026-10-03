@@ -43,12 +43,12 @@ static/js/app.js
    ```
    python app.py
    ```
-   Open http://localhost:8080. The dashboard cache refreshes every `SYNC_INTERVAL_MINUTES`.
-   At 4:00 AM (`TIMEZONE`), a background job archives yesterday's attendance, then runs
-   `data_fetch.py` to fetch the next set of source data.
+   Open http://localhost:8080. Archive and ESSL data fetches are started manually by a developer
+   from the **SYNC** section in the sidebar. Fetch output streams to the page; after a failed run,
+   clicking **Fetch Data** again retries only locations that have not completed.
 
 Production: `gunicorn -w 1 -b 0.0.0.0:8080 app:app`
-(use a single worker so the background sync runs only once).
+(use a single worker to keep in-memory dashboard caches consistent).
 On Render, add `GOOGLE_CREDENTIALS` as an environment secret containing the service-account
 JSON content. The Docker image intentionally excludes `service-account.json`; `data_fetch.py`
 accepts this secret directly (or `GOOGLE_CREDS` if configured separately).
@@ -66,6 +66,8 @@ this cache; sync requests themselves are never cached.
 | `GET /api/sync` | Re-read the source and save the matrix to the output sheet |
 | `GET /api/attendance-matrix?branch=NAME` | Saved attendance history used by the frontend to identify inactive employees |
 | `GET /api/attendance-matrices?branch=NAME&branch=NAME` | Batch-read saved attendance history for summary reports |
+| `POST /api/developer/archive` | Archive yesterday's attendance (developer only) |
+| `POST /api/developer/fetch-data` | Stream ESSL fetch logs and update the status matrix (developer only) |
 
 The source tabs need these header columns (tab name = branch):
 `Date`, `Employee Code`, `Employee Name`, `In Time`, `Out Time`.

@@ -6,21 +6,18 @@ API
   GET /api/sync               -> {"rows": N, "branches": M}
                                  (re-read source sheet + back-fill P/H/A matrix in the output sheet)
 
-Scheduler
-    * every day at ARCHIVE_HOUR:ARCHIVE_MINUTE (default 04:00, Asia/Kolkata):
-                yesterday's P/H/A column is archived, then data_fetch.py refreshes source data
-  * every SYNC_INTERVAL_MINUTES: dashboard cache refresh (does not write to the output sheet)
+Archive and ESSL fetch are started manually by a developer from the Sync sidebar.
 """
 import gzip
+import json
 import logging
 import subprocess
 import sys
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-from flask import Flask, jsonify, redirect, render_template, request
+from flask import Flask, Response, jsonify, redirect, render_template, request, stream_with_context
 from flask_cors import CORS
 
 import auth
@@ -29,6 +26,7 @@ from config import Config
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("attendance")
+_sync_action_lock = threading.Lock()
 
 def _compress_json_response(response):
     """Gzip sizeable JSON API responses when the client supports it."""
@@ -212,98 +210,115 @@ def create_app():
             log.exception("Attendance matrices fetch failed")
             return jsonify({"error": str(e)}), 500
 
+    @app.post("/api/developer/archive")
+    @auth.roles_required("developer")
+    def developer_archive():
+        if not _sync_action_lock.acquire(blocking=False):
+            return jsonify({"error": "A sync action is already running."}), 409
+        try:
+            sheets_sync.archive_yesterday()
+            return jsonify({"ok": True, "message": "Yesterday's attendance was archived."})
+        except Exception as e:
+            log.exception("Developer archive failed")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            _sync_action_lock.release()
+
+    @app.post("/api/developer/fetch-data")
+    @auth.roles_required("developer")
+    def developer_fetch_data():
+        if not _sync_action_lock.acquire(blocking=False):
+            return jsonify({"error": "A sync action is already running."}), 409
+        lock_state = {"held": True}
+
+        def release_lock():
+            if lock_state["held"]:
+                lock_state["held"] = False
+                _sync_action_lock.release()
+
+        def event(name, payload):
+            return f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+        @stream_with_context
+        def stream():
+            process = None
+            try:
+                log.info("Developer started the ESSL data fetch.")
+                yield event("log", {"message": "Starting ESSL data fetch..."})
+                process = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-u",
+                        "-c",
+                        "import data_fetch; data_fetch.run(retain_progress=True)",
+                    ],
+                    cwd=str(Path(__file__).resolve().parent),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    bufsize=1,
+                )
+                if process.stdout is None:
+                    raise RuntimeError("Could not read data-fetch output.")
+                for line in process.stdout:
+                    yield event("log", {"message": line.rstrip()})
+                return_code = process.wait()
+                if return_code:
+                    yield event("done", {
+                        "ok": False,
+                        "message": f"Fetch failed (exit code {return_code}). Click Fetch Data again to retry remaining locations.",
+                    })
+                    return
+
+                yield event("log", {"message": "Updating the attendance status matrix..."})
+                rows, branches = sheets_sync.sync()
+                progress_file = Path(__file__).resolve().with_name(".data_fetch_progress.json")
+                progress_file.unlink(missing_ok=True)
+                yield event("log", {
+                    "message": f"Status matrix updated: {rows} rows across {branches} branches."
+                })
+                yield event("done", {"ok": True, "message": "Data fetch and matrix update completed."})
+            except GeneratorExit:
+                if process is not None and process.poll() is None:
+                    process.terminate()
+                    process.wait()
+                raise
+            except Exception as e:
+                log.exception("Developer data fetch failed")
+                yield event("done", {"ok": False, "message": str(e)})
+            finally:
+                if process is not None and process.poll() is None:
+                    process.terminate()
+                    process.wait()
+                release_lock()
+
+        response = Response(stream(), mimetype="text/event-stream", headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        })
+        response.call_on_close(release_lock)
+        return response
+
     @app.get("/api/sync")
     @auth.roles_required("developer", "admin")          # writes to the output sheet
     def sync_now():
+        if not _sync_action_lock.acquire(blocking=False):
+            return jsonify({"error": "A sync action is already running."}), 409
         try:
             rows, branches = sheets_sync.sync()
             return jsonify({"rows": rows, "branches": branches})
         except Exception as e:
             log.exception("Manual sync failed")
             return jsonify({"error": str(e)})
+        finally:
+            _sync_action_lock.release()
 
     return app
 
 
-def start_scheduler():
-    scheduler = BackgroundScheduler(daemon=True, timezone=Config.TIMEZONE)
-
-    # APScheduler runs this sequence on its background executor.
-    def daily_pipeline_job():
-        try:
-            log.info("Daily pipeline step 1/3: archive yesterday")
-            sheets_sync.archive_yesterday()
-        except Exception:
-            log.exception("Daily archive failed; data fetch skipped")
-            return
-
-        try:
-            log.info("Daily pipeline step 2/3: fetch ESSL data")
-            result = subprocess.run(
-                [sys.executable, "-c", "import data_fetch; data_fetch.run()"],
-                cwd=str(Path(__file__).resolve().parent),
-                capture_output=True,
-                text=True,
-                timeout=3 * 60 * 60,
-            )
-            if result.stdout:
-                log.info("data_fetch output:\n%s", result.stdout[-3000:])
-            if result.returncode:
-                log.error("Data fetch failed (exit %s):\n%s",
-                          result.returncode, (result.stderr or "")[-3000:])
-                return
-            log.info("Data fetch finished")
-        except subprocess.TimeoutExpired:
-            log.error("Data fetch timed out")
-            return
-        except Exception:
-            log.exception("Data fetch failed")
-            return
-
-        try:
-            log.info("Daily pipeline step 3/3: update status matrix")
-            rows, branches = sheets_sync.sync()
-            log.info("Status matrix updated after ESSL fetch: %d rows, %d branches",
-                     rows, branches)
-        except Exception:
-            log.exception("Status matrix update after ESSL fetch failed")
-
-    scheduler.add_job(
-        daily_pipeline_job,
-        CronTrigger(hour=Config.ARCHIVE_HOUR, minute=Config.ARCHIVE_MINUTE,
-                    timezone=Config.TIMEZONE),
-        id="daily_archive_and_fetch",
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=3600,   # still runs if the PC was busy/asleep up to 1 h late
-    )
-
-    # 2) Dashboard cache refresh only (does NOT write to the output sheet)
-    if Config.SYNC_INTERVAL_MINUTES > 0:
-        def refresh_job():
-            try:
-                sheets_sync.refresh_cache()
-            except Exception:
-                log.exception("Cache refresh failed")
-
-        scheduler.add_job(
-            refresh_job,
-            "interval",
-            minutes=Config.SYNC_INTERVAL_MINUTES,
-            next_run_time=datetime.now() + timedelta(seconds=5),
-            max_instances=1,
-            coalesce=True,
-        )
-
-    scheduler.start()
-    log.info("Daily archive/fetch pipeline scheduled for %02d:%02d (%s)",
-             Config.ARCHIVE_HOUR, Config.ARCHIVE_MINUTE, Config.TIMEZONE)
-    return scheduler
-
-
 app = create_app()
-start_scheduler()
 
 if __name__ == "__main__":
-    # use_reloader=False so the scheduler is not started twice
     app.run(host="0.0.0.0", port=Config.PORT, debug=True, use_reloader=False)
