@@ -5,7 +5,8 @@
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const TABS = [['daily', 'Daily Report'], ['matrix', 'Status Matrix'],
-                ['inactive', 'Inactive Employees'], ['summary', 'Overall Summary']];
+                ['inactive', 'Inactive Employees'], ['summary', 'Overall Summary'],
+                ['punchin', 'Punch-in Report']];
   const BUSINESSES = ['MAGNUS', 'ALIMS', 'M&D', 'MERCHX', 'HU', 'GRANDIS'];
   let me = null;
 

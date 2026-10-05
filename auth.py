@@ -32,7 +32,7 @@ USERS_FILE = BASE_DIR / "users.json"
 SECRET_FILE = BASE_DIR / ".secret_key"
 
 ROLES = ("developer", "admin", "business")
-TABS = ("daily", "matrix", "inactive", "summary")
+TABS = ("daily", "matrix", "inactive", "summary", "punchin")
 BUSINESSES = ("MAGNUS", "ALIMS", "M&D", "MERCHX", "HU", "GRANDIS")
 
 # Same mapping as static/js/app.js - used so the SERVER can enforce business scope.

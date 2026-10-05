@@ -86,7 +86,7 @@ def create_app():
     def data():
         user = auth.current_user()
         branch = request.args.get("branch", "")
-        if not auth.can_view_tab(user, "daily", "summary") or not auth.branch_allowed(user, branch):
+        if not auth.can_view_tab(user, "daily", "summary", "punchin") or not auth.branch_allowed(user, branch):
             return _deny()
         try:
             rows = sheets_sync.get_branch_data(branch)
@@ -173,7 +173,7 @@ def create_app():
         user = auth.current_user()
         branch = request.args.get("branch", "")
         if (
-            not auth.can_view_tab(user, "daily", "summary", "inactive")
+            not auth.can_view_tab(user, "daily", "summary", "inactive", "punchin")
             or not auth.branch_allowed(user, branch)
         ):
             return _deny()
@@ -191,7 +191,7 @@ def create_app():
     def attendance_matrices():
         user = auth.current_user()
         branches = list(dict.fromkeys(request.args.getlist("branch")))
-        if not auth.can_view_tab(user, "summary") or any(
+        if not auth.can_view_tab(user, "summary", "punchin") or any(
             not auth.branch_allowed(user, branch) for branch in branches
         ):
             return _deny()
