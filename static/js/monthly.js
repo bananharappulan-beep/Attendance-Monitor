@@ -14,6 +14,7 @@
   let model = null;                          // { monthLabel, scope, rows:[...] }
   let sort = { key: 'name', dir: 1 };
   let loadToken = 0;
+  let shownRows = [];                        // rows as currently displayed (search + sort applied)
 
   const COLUMNS = [
     { key: 'sl', label: 'SL NO', nosort: true },
@@ -109,6 +110,7 @@
     if (!model) return;
     const q = String($id('employeeSearch')?.value || '').trim().toLowerCase();
     const shown = sorted(model.rows.filter(r => !q || `${r.code} ${r.name}`.toLowerCase().includes(q)));
+    shownRows = shown;
     const sum = shown.reduce((t, r) => { t.P += r.P; t.H += r.H; t.A += r.A; return t; }, { P: 0, H: 0, A: 0 });
     const total = sum.P + sum.H + sum.A;
 
@@ -160,7 +162,39 @@
     }
   }
 
+  // ---------- PDF ----------
+  async function exportMonthlyPdf() {
+    if (!model || !shownRows.length) return setMsg('No data to export for this view.', true);
+    if (!(await pdfReady())) return;
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
+    await registerLoraFont(doc);
+    const w = doc.internal.pageSize.getWidth();
+    const sum = shownRows.reduce((t, r) => { t.P += r.P; t.H += r.H; t.A += r.A; return t; }, { P: 0, H: 0, A: 0 });
+    doc.setFont('Lora', 'bold'); doc.setFontSize(16);
+    doc.text(`Monthly Status Report - ${model.monthLabel}`, w / 2, 38, { align: 'center' });
+    doc.setFont('Lora', 'normal'); doc.setFontSize(10); doc.setTextColor(100);
+    doc.text(`${model.scope}   |   Employees: ${shownRows.length}   Present: ${sum.P}   Half-day: ${sum.H}   Absent: ${sum.A}`, w / 2, 56, { align: 'center' });
+    const colors = { 4: [[220, 252, 231], [22, 101, 52]], 5: [[254, 243, 199], [146, 64, 14]], 6: [[254, 226, 226], [153, 27, 27]] };
+    doc.autoTable({
+      startY: 68,
+      head: [['SL NO', 'EMP CODE', 'EMP NAME', 'BRANCH', 'PRESENT', 'HALF DAY', 'ABSENT', 'TOTAL DAYS', 'PRESENT %']],
+      body: shownRows.map((r, i) => [i + 1, r.code, r.name, r.branch, r.P, r.H, r.A, r.total, `${r.pct}%`]),
+      styles: { font: 'Lora', fontSize: 8.5, cellPadding: 4, halign: 'center' },
+      headStyles: { fillColor: [217, 217, 217], textColor: [0, 0, 0], font: 'Lora', fontStyle: 'bold', halign: 'center' },
+      didParseCell: h => {
+        if (h.section !== 'body') return;
+        if (h.column.index === 2 || h.column.index === 3) h.cell.styles.halign = 'left';
+        const c = colors[h.column.index];
+        if (c) { h.cell.styles.fillColor = c[0]; h.cell.styles.textColor = c[1]; h.cell.styles.fontStyle = 'bold'; }
+      }
+    });
+    doc.save(`monthly-status-${model.ym}.pdf`);
+    setMsg(`Exported monthly-status-${model.ym}.pdf`);
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
+    $id('exportMonthlyPdf')?.addEventListener('click', exportMonthlyPdf);
     const head = $id('monthlyHead');
     const apply = th => {
       const key = th && th.dataset.sort;

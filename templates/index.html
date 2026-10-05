@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Attendance Monitor</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='10') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='13') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css', v='4') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/punchin.css', v='5') }}">
 </head>
@@ -35,14 +35,15 @@
         <input id="date" type="date">
       </label>
       <button id="refresh" class="btn"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-3M4 5v4h4M4 13a8 8 0 0 0 14.9 3M20 19v-4h-4"/></svg>Refresh</button>
-      <button id="themeToggle" class="btn btn-secondary" type="button" aria-pressed="false">Dark mode</button>
         <div id="exportActions" class="top-export-actions">
           <button id="exportPdf" class="btn-export" title="Export this branch's Daily Report as PDF"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 19h14"/></svg>Export PDF</button>
           <button id="exportAll" class="btn-export" title="Download one PDF per branch"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 19h14"/></svg>All PDFs</button>
           <button id="exportMatrixPdf" class="btn-export hidden" title="Export the Status Matrix as PDF"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 19h14"/></svg>Matrix PDF</button>
           <button id="exportInactivePdf" class="btn-export hidden" title="Export Inactive Employees as PDF"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 19h14"/></svg>Inactive PDF</button>
           <button id="exportSummaryPdf" class="btn-export hidden" title="Export the Overall Summary as PDF"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 19h14"/></svg>Summary PDF</button>
+          <button id="exportMonthlyPdf" class="btn-export hidden" title="Download the Monthly Status report as PDF"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 19h14"/></svg>Monthly PDF</button>
         </div>
+      <button id="themeToggle" class="theme-toggle" type="button" aria-pressed="false"></button>
     </div>
   </header>
 
@@ -206,8 +207,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highcharts/11.4.8/highcharts.js"></script>
 <script src="{{ url_for('static', filename='js/auth-ui.js', v='7') }}"></script>
-<script src="{{ url_for('static', filename='js/app.js', v='22') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='25') }}"></script>
 <script src="{{ url_for('static', filename='js/punchin.js', v='10') }}"></script>
-<script src="{{ url_for('static', filename='js/monthly.js', v='1') }}"></script>
+<script src="{{ url_for('static', filename='js/monthly.js', v='2') }}"></script>
 </body>
 </html>

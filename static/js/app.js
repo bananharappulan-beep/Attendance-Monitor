@@ -10,9 +10,12 @@ document.documentElement.dataset.theme = savedTheme === 'dark' ? 'dark' : 'light
 if (themeToggle) {
   const updateThemeToggle = () => {
     const isDark = document.documentElement.dataset.theme === 'dark';
-    themeToggle.textContent = isDark ? 'Light mode' : 'Dark mode';
+    themeToggle.innerHTML = isDark
+      ? '<svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
+      : '<svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
     themeToggle.setAttribute('aria-pressed', String(isDark));
     themeToggle.title = `Switch to ${isDark ? 'light' : 'dark'} mode`;
+    themeToggle.setAttribute('aria-label', themeToggle.title);
   };
   updateThemeToggle();
   themeToggle.addEventListener('click', () => {
@@ -484,8 +487,8 @@ function showDeveloperSyncPanel(action) {
   document.querySelectorAll('.sync-action').forEach(button =>
     button.classList.toggle('active', button.id === (action === 'archive' ? 'syncArchive' : 'syncFetchData'))
   );
-  ['exportPdf', 'exportAll', 'exportMatrixPdf', 'exportInactivePdf', 'exportSummaryPdf']
-    .forEach(id => $(id).classList.add('hidden'));
+  ['exportPdf', 'exportAll', 'exportMatrixPdf', 'exportInactivePdf', 'exportSummaryPdf', 'exportMonthlyPdf']
+    .forEach(id => $(id)?.classList.add('hidden'));
   $('syncTitle').textContent = action === 'archive' ? 'Archive Attendance' : 'Fetch Attendance Data';
   $('syncLog').textContent = '';
   $('syncStatus').className = 'sync-status';
@@ -579,6 +582,7 @@ function showTab(tab) {
   $('exportMatrixPdf').classList.toggle('hidden', tab !== 'matrix');
   $('exportInactivePdf').classList.toggle('hidden', tab !== 'inactive');
   $('exportSummaryPdf').classList.toggle('hidden', tab !== 'summary');
+  $('exportMonthlyPdf')?.classList.toggle('hidden', tab !== 'monthly');
   refreshActiveView();
   filterVisibleRows();
 }

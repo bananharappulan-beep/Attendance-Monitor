@@ -358,3 +358,18 @@ input[type="date"]::-webkit-datetime-edit-year-field:focus {
   .reports-group, .reports-options, .reports-options[hidden] { display: contents; }
   #reportsToggle { display: none; }
 }
+
+/* Theme toggle: compact pill (moon / sun + label) */
+.theme-toggle { display: inline-flex; align-items: center; justify-content: center; width: 2.6rem; height: 2.6rem; padding: 0; border-radius: 50%; border: 1px solid var(--gold); background: var(--surface); color: var(--dark); font: inherit; font-weight: 600; cursor: pointer; box-shadow: 4px 5px 10px var(--shadow-dark), -3px -3px 8px var(--shadow-light); }
+.theme-toggle:hover { background: var(--gold-soft, #f7efd9); }
+.theme-toggle:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.theme-toggle .ui-icon { width: 1.15rem; height: 1.15rem; }
+[data-theme="dark"] .theme-toggle { color: var(--gold); }
+
+/* Status Matrix table uses the full available width (it scrolls inside .matrix-wrap when wider) */
+.matrix-table { width: 100%; }
+
+/* Hide only the main page scrollbar. The page still scrolls with wheel / keys / touch;
+   tables keep their own scrollbars. */
+html { scrollbar-width: none; -ms-overflow-style: none; }
+html::-webkit-scrollbar { display: none; }
