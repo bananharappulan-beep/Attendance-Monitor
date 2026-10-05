@@ -251,7 +251,8 @@
     const col = {
       slot: v('--navy-soft', '#16403d'), peak: v('--gold', '#c9a24b'), after: v('--red', '#b3382e'),
       none: v('--faint', '#9a937c'), late: v('--late', '#b45309'), text: v('--text', '#1b2b29'),
-      muted: v('--muted', '#6f6a58'), border: 'rgba(74, 65, 40, .14)'
+      muted: v('--muted', '#6f6a58'), border: v('--border', 'rgba(74, 65, 40, .14)'),
+      surface: v('--surface', '#ffffff')
     };
     const peak = peakOf(scope.counts);
     const colorOf = (bucket, i) => i === peak ? col.peak : bucket.kind === 'after' ? col.after : bucket.kind === 'none' ? col.none : col.slot;
@@ -283,7 +284,7 @@
       },
       tooltip: {
         shared: true, useHTML: true, outside: true, borderRadius: 8, borderColor: col.peak,
-        backgroundColor: '#fffdf7', shadow: false, style: { color: col.text, fontSize: '12px' },
+        backgroundColor: col.surface, shadow: false, style: { color: col.text, fontSize: '12px' },
         formatter() {
           const i = this.points[0].point.index, n = scope.counts[i], bucket = BUCKETS[i];
           let html = `<div style="min-width:150px"><b>${text(bucket.label)}</b><br>`
@@ -309,6 +310,71 @@
     });
   }
 
+  // ---------- Present / Absent pie (Highcharts) ----------
+  let presenceChart = null;
+  function destroyPresenceChart() {
+    if (presenceChart) { try { presenceChart.destroy(); } catch (e) { /* ignore */ } presenceChart = null; }
+  }
+
+  function renderPresenceChart(scope, byBusiness, scopeName) {
+    const box = $id('presenceChart');
+    if (!box) return;
+    destroyPresenceChart();
+    box.innerHTML = '';
+    const present = scope.total - scope.counts[IDX_NONE];
+    const absent = scope.counts[IDX_NONE];
+    $id('presenceHint').textContent = model.date ? `Present and absent for ${dmy(model.date)} (${scopeName}).` : '';
+    $id('presenceTitle').textContent = `Present vs Absent · ${scopeName}`;
+    if (!window.Highcharts) {
+      box.innerHTML = `<div class="empty">Present: ${present} · Absent: ${absent} (Highcharts could not be loaded)</div>`;
+      return;
+    }
+    const css = getComputedStyle(document.documentElement);
+    const v = (name, fallback) => (css.getPropertyValue(name) || '').trim() || fallback;
+    const col = { present: v('--green-fg', '#1f6b4a'), absent: v('--red', '#b3382e'), text: v('--text', '#1b2b29'),
+                  muted: v('--muted', '#6f6a58'), border: v('--border', 'rgba(74, 65, 40, .14)'),
+                  surface: v('--surface', '#ffffff'), gold: v('--gold', '#c9a24b') };
+    const plural = n => `${n} employee${n === 1 ? '' : 's'}`;
+    const businessCount = (b, key) => key === 'present' ? b.total - b.counts[IDX_NONE] : b.counts[IDX_NONE];
+
+    presenceChart = Highcharts.chart(box, {
+      chart: { type: 'pie', height: 360, backgroundColor: 'transparent', style: { fontFamily: getComputedStyle(box).fontFamily } },
+      title: { text: null },
+      credits: { enabled: false }, legend: { enabled: false },
+      tooltip: {
+        useHTML: true, outside: true, borderRadius: 8, borderColor: col.gold, backgroundColor: col.surface,
+        shadow: false, style: { color: col.text, fontSize: '12px' },
+        formatter() {
+          const key = this.point.options.key, n = this.y;
+          let html = `<div style="min-width:150px"><b>${key === 'present' ? 'Present' : 'Absent (no punch-in)'}</b><br>`
+            + `${plural(n)} (${pct(n, scope.total)} of ${scope.total})`;
+          if (byBusiness && n > 0) {            // ALL BUSINESS view only: business-wise split
+            const parts = byBusiness.filter(b => businessCount(b, key) > 0);
+            html += `<table style="width:100%;margin-top:6px;border-top:1px solid ${col.border};border-collapse:collapse">`
+              + parts.map(b => `<tr><td style="padding:2px 0">${text(b.label)}</td>`
+                + `<td style="padding:2px 0 2px 16px;text-align:right;font-weight:700">${businessCount(b, key)}</td></tr>`).join('')
+              + '</table>';
+          }
+          return html + '</div>';
+        }
+      },
+      plotOptions: {
+        pie: {
+          borderWidth: 3, borderColor: col.surface, center: ['50%', '50%'], size: '80%',
+          states: { inactive: { opacity: 1 } }, animation: { duration: 250 },
+          dataLabels: {
+            enabled: true, distance: 16, style: { color: col.text, fontSize: '12px', fontWeight: '600', textOutline: 'none' },
+            formatter() { return this.y ? `${this.point.name}: ${this.y} (${pct(this.y, scope.total)})` : null; }
+          }
+        }
+      },
+      series: [{ name: 'Employees', data: [
+        { name: 'Present', key: 'present', y: present, color: col.present },
+        { name: 'Absent', key: 'absent', y: absent, color: col.absent }
+      ] }]
+    });
+  }
+
   // Decide which branch to chart: the top Branch dropdown, or the whole Business selection.
   function resolveBranch() {
     if (followTop) branchKey = topBranchKey();
@@ -325,12 +391,17 @@
     $id('punchinHint').textContent = model.date ? `Punch-in times for ${dmy(model.date)} (${scopeName}).` : '';
     $id('punchinChartTitle').textContent = `Employees by punch-in time · ${row ? row.label : model.scope}`;
     renderCards(scope);
-    renderChart(scope, model.allBusinesses && !row ? model.byBusiness : null);
+    const split = model.allBusinesses && !row ? model.byBusiness : null;
+    renderChart(scope, split);
+    renderPresenceChart(scope, split, scopeName);
   }
 
   function showMessage(message, isError) {
     $id('punchinCards').innerHTML = '';
     $id('punchinChartTitle').textContent = 'Employees by punch-in time';
+    destroyPresenceChart();
+    if ($id('presenceChart')) $id('presenceChart').innerHTML = `<div class="empty">${isError ? 'Error: ' : ''}${text(message)}</div>`;
+    if ($id('presenceTitle')) $id('presenceTitle').textContent = 'Present vs Absent';
     destroyChart();
     $id('punchinChart').innerHTML = `<div class="empty">${isError ? 'Error: ' : ''}${text(message)}</div>`;
   }
@@ -364,18 +435,24 @@
     });
   });
 
+  document.addEventListener('attendance-theme-change', () => {
+    if (model) render();
+  });
+
   // Add / remove the ALL entry as the Punch-in Report is opened / closed (before the other tabs read the dropdown).
   if (typeof window.showTab === 'function') {
     const originalShowTab = window.showTab;
     window.showTab = function (tab) {
-      if (tab === 'punchin') { followTop = true; addAllOption(); }
+      if (tab === 'punchin' || tab === 'presence') { followTop = true; addAllOption(); }
+      else if (tab === 'monthly') addAllOption();
       else removeAllOption();
       const result = originalShowTab.apply(this, arguments);
-      if (tab === 'punchin') setTimeout(() => { if (chart) chart.reflow(); }, 0);
+      if (tab === 'punchin' || tab === 'presence') setTimeout(() => { if (chart) chart.reflow(); if (presenceChart) presenceChart.reflow(); }, 0);
       return result;
     };
   }
 
   window.loadPunchin = loadPunchin;
-  window.punchinOpen = () => { const el = $id('punchin'); return Boolean(el) && !el.classList.contains('hidden'); };
+  window.addAllBranchOption = addAllOption;
+  window.punchinOpen = () => ['punchin', 'presence'].some(id => { const el = $id(id); return Boolean(el) && !el.classList.contains('hidden'); });
 })();

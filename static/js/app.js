@@ -3,6 +3,27 @@
 // If you host the front end elsewhere, set this to your Flask URL, e.g. 'https://attendance.example.com'.
 const API_URL = '';
 
+const themeToggle = document.getElementById('themeToggle');
+const savedTheme = localStorage.getItem('attendance-monitor-theme');
+document.documentElement.dataset.theme = savedTheme === 'dark' ? 'dark' : 'light';
+
+if (themeToggle) {
+  const updateThemeToggle = () => {
+    const isDark = document.documentElement.dataset.theme === 'dark';
+    themeToggle.textContent = isDark ? 'Light mode' : 'Dark mode';
+    themeToggle.setAttribute('aria-pressed', String(isDark));
+    themeToggle.title = `Switch to ${isDark ? 'light' : 'dark'} mode`;
+  };
+  updateThemeToggle();
+  themeToggle.addEventListener('click', () => {
+    const nextTheme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = nextTheme;
+    localStorage.setItem('attendance-monitor-theme', nextTheme);
+    updateThemeToggle();
+    document.dispatchEvent(new Event('attendance-theme-change'));
+  });
+}
+
 window.addEventListener('load', async () => {
   let user;
   try {
@@ -29,8 +50,10 @@ window.addEventListener('load', async () => {
     businessSelect.disabled = true;
   }
   document.querySelectorAll('.tab[data-tab]').forEach(button =>
-    button.classList.toggle('hidden', !permissions.tabs.includes(button.dataset.tab))
+    button.classList.toggle('hidden', !permissions.tabs.includes(['presence', 'monthly'].includes(button.dataset.tab) ? 'punchin' : button.dataset.tab))
   );
+  // hide the whole Reports group when none of its reports is allowed
+  $('reportsGroup')?.classList.toggle('hidden', !document.querySelector('#reportsOptions .tab[data-tab]:not(.hidden)'));
   if (!permissions.download) $('exportActions').classList.add('hidden');
   if (!permissions.change_date) {
     ['date', 'from', 'to'].forEach(id => {
@@ -454,7 +477,7 @@ function appendSyncLog(message) {
 }
 
 function showDeveloperSyncPanel(action) {
-  ['daily', 'matrix', 'inactive', 'summary', 'punchin'].forEach(id => $(id)?.classList.add('hidden'));
+  ['daily', 'matrix', 'inactive', 'summary', 'punchin', 'presence', 'monthly'].forEach(id => $(id)?.classList.add('hidden'));
   $('syncPanel').classList.remove('hidden');
   $('employeeSearchRow').classList.add('hidden');
   document.querySelectorAll('.tab[data-tab]').forEach(button => button.classList.remove('active'));
@@ -532,14 +555,25 @@ async function runDeveloperSyncAction(action) {
 
 window.runDeveloperSyncAction = runDeveloperSyncAction;
 
+function setReportsOpen(open) {
+  const toggle = $('reportsToggle'), options = $('reportsOptions');
+  if (!toggle || !options) return;
+  toggle.setAttribute('aria-expanded', String(open));
+  options.hidden = !open;
+}
+$('reportsToggle')?.addEventListener('click', () =>
+  setReportsOpen($('reportsToggle').getAttribute('aria-expanded') !== 'true')
+);
+
 function showTab(tab) {
   $('syncPanel').classList.add('hidden');
   document.querySelectorAll('.sync-action').forEach(button => button.classList.remove('active'));
-  ['daily', 'matrix', 'inactive', 'summary', 'punchin'].forEach(id => $(id)?.classList.toggle('hidden', id !== tab));
-  $('employeeSearchRow').classList.toggle('hidden', tab === 'summary' || tab === 'punchin');
+  ['daily', 'matrix', 'inactive', 'summary', 'punchin', 'presence', 'monthly'].forEach(id => $(id)?.classList.toggle('hidden', id !== tab));
+  $('employeeSearchRow').classList.toggle('hidden', ['summary', 'punchin', 'presence'].includes(tab));
   document.querySelectorAll('.tab[data-tab]').forEach(button =>
     button.classList.toggle('active', button.dataset.tab === tab)
   );
+  setReportsOpen(true);
   $('exportPdf').classList.toggle('hidden', tab !== 'daily');
   $('exportAll').classList.toggle('hidden', tab !== 'daily');
   $('exportMatrixPdf').classList.toggle('hidden', tab !== 'matrix');
@@ -575,6 +609,7 @@ bind('date', 'onchange', () => {
   renderMatrix();
   if (!$('summary').classList.contains('hidden')) loadSummary();
   if (window.punchinOpen?.()) loadPunchin();
+  if (window.monthlyOpen?.()) loadMonthly();
 });
 bind('from', 'onchange', renderMatrix);
 bind('to', 'onchange', renderMatrix);
@@ -583,10 +618,14 @@ bind('exportSummaryPdf', 'onclick', exportSummaryPdf);
 async function refreshActiveView() {
   if (!$('branch').value) return;
   clearApiCache();
-  const activeTab = ['daily', 'matrix', 'inactive', 'summary', 'punchin']
+  const activeTab = ['daily', 'matrix', 'inactive', 'summary', 'punchin', 'presence', 'monthly']
     .find(id => !$(`${id}`).classList.contains('hidden'));
-  if (activeTab === 'punchin') {
+  if (activeTab === 'punchin' || activeTab === 'presence') {
     await loadPunchin();
+    return;
+  }
+  if (activeTab === 'monthly') {
+    await loadMonthly();
     return;
   }
   if (activeTab === 'summary') {

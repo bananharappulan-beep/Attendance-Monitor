@@ -3,7 +3,7 @@
 .login-card {
   width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: .9rem;
   padding: 1.8rem 1.6rem; background: var(--surface); border-radius: 1.35rem;
-  border: 1px solid rgba(255, 255, 255, .92);
+  border: 1px solid var(--surface-border, rgba(255, 255, 255, .92));
   box-shadow: 10px 12px 24px var(--shadow-dark), -8px -8px 20px var(--shadow-light);
 }
 .login-card h1 { margin: 0; font-size: 1.5rem; }
@@ -11,7 +11,7 @@
 .login-btn { justify-content: center; margin-top: .3rem; }
 
 input[type="text"], input[type="password"], input[type="number"] {
-  width: 100%; border: 1px solid rgba(74, 65, 40, .08); border-radius: .85rem;
+  width: 100%; border: 1px solid var(--border); border-radius: .85rem;
   padding: .5rem .75rem; background: var(--surface); font: inherit; color: inherit; outline: 0;
   box-shadow: 3px 4px 9px rgba(196, 186, 158, .42), -3px -3px 8px var(--shadow-light);
 }

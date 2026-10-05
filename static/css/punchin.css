@@ -48,3 +48,23 @@
 
 @media (max-width: 900px) { .punchin-cards { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 600px) { .punchin-cards { grid-template-columns: 1fr; } }
+
+/* Present / Absent pie */
+.presence-chart { width: 100%; min-height: 360px; }
+
+/* Monthly Status Report */
+.monthly-cards { grid-template-columns: repeat(3, 1fr); }
+#monthly .hint { margin-bottom: .6rem; }
+#monthlyTable th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+#monthlyTable th.sortable:hover { color: var(--gold, #c9a24b); }
+#monthlyTable th.sortable:focus-visible { outline: 2px solid var(--gold, #c9a24b); outline-offset: -2px; }
+#monthlyTable td.num, #monthlyTable th.num { text-align: center; }
+#monthlyTable td.nowrap { white-space: nowrap; }
+#monthlyTable .pill { min-width: 2rem; width: auto; padding: 0 .35rem; }
+.monthly-pct { white-space: nowrap; }
+.monthly-bar { display: inline-flex; width: 4.5rem; height: .5rem; margin-right: .5rem; vertical-align: middle; border-radius: 99px; overflow: hidden; background: var(--border, rgba(74, 65, 40, .14)); }
+.monthly-bar i { display: block; height: 100%; }
+.monthly-bar i.p { background: var(--green-fg, #1f7a4d); }
+.monthly-bar i.h { background: var(--amber-fg, #b45309); }
+.monthly-bar i.a { background: var(--red, #b3382e); }
+@media (max-width: 600px) { .monthly-cards { grid-template-columns: 1fr; } }

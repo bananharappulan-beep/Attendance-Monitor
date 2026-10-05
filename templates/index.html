@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Attendance Monitor</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='8') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css', v='3') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/punchin.css', v='3') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='10') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css', v='4') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/punchin.css', v='5') }}">
 </head>
 <body>
 <div class="container">
@@ -35,6 +35,7 @@
         <input id="date" type="date">
       </label>
       <button id="refresh" class="btn"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-3M4 5v4h4M4 13a8 8 0 0 0 14.9 3M20 19v-4h-4"/></svg>Refresh</button>
+      <button id="themeToggle" class="btn btn-secondary" type="button" aria-pressed="false">Dark mode</button>
         <div id="exportActions" class="top-export-actions">
           <button id="exportPdf" class="btn-export" title="Export this branch's Daily Report as PDF"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 19h14"/></svg>Export PDF</button>
           <button id="exportAll" class="btn-export" title="Download one PDF per branch"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 19h14"/></svg>All PDFs</button>
@@ -79,7 +80,18 @@
         <button data-tab="matrix" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM4 10h16M10 4v16"/></svg>Status Matrix</button>
         <button data-tab="inactive" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5 20a7 7 0 0 1 14 0M19 5l2 2-4 4"/></svg>Inactive Employees</button>
         <button data-tab="summary" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V9M12 19V5M19 19v-7"/></svg>Overall Summary</button>
-        <button data-tab="punchin" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>Punch-in Report</button>
+        <div id="reportsGroup" class="reports-group">
+          <button id="reportsToggle" class="sidebar-section-toggle" type="button" aria-expanded="true" aria-controls="reportsOptions">
+            <svg class="ui-icon sync-section-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 13h6M9 17h6"/></svg>
+            <span>Insights</span>
+            <svg class="ui-icon sync-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+          <div id="reportsOptions" class="reports-options">
+            <button data-tab="punchin" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>Punch-in Report</button>
+            <button data-tab="presence" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/></svg>Present &amp; Absent</button>
+            <button data-tab="monthly" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg>Monthly Status</button>
+          </div>
+        </div>
         <button id="sidebarUsers" class="tab sidebar-admin hidden"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM19 8v6M22 11h-6"/></svg>Users &amp; Access</button>
       </nav>
       <div id="developerSyncSection" class="developer-sync hidden">
@@ -158,6 +170,29 @@
       </div>
     </div>
   </section>
+  <section id="presence" class="hidden">
+    <div class="hint" id="presenceHint"></div>
+    <div class="card punchin-chart-card">
+      <div class="punchin-chart-head">
+        <h2 id="presenceTitle">Present vs Absent</h2>
+      </div>
+      <div id="presenceChart" class="presence-chart"></div>
+      <div class="punchin-legend" aria-hidden="true">
+        <span><i style="background:var(--green-fg)"></i>Present (punched in)</span>
+        <span><i style="background:var(--red)"></i>Absent (no punch-in)</span>
+      </div>
+    </div>
+  </section>
+  <section id="monthly" class="hidden">
+    <div class="hint" id="monthlyHint"></div>
+    <div id="monthlyCards" class="cards punchin-cards monthly-cards"></div>
+    <div class="table-wrap monthly-wrap">
+      <table id="monthlyTable" class="data-table">
+        <thead id="monthlyHead"></thead>
+        <tbody id="monthlyBody"></tbody>
+      </table>
+    </div>
+  </section>
   <section id="syncPanel" class="sync-panel hidden" aria-live="polite">
     <h2 id="syncTitle"></h2>
     <p id="syncStatus" class="sync-status">Choose an action from the Sync menu.</p>
@@ -171,7 +206,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highcharts/11.4.8/highcharts.js"></script>
 <script src="{{ url_for('static', filename='js/auth-ui.js', v='7') }}"></script>
-<script src="{{ url_for('static', filename='js/app.js', v='18') }}"></script>
-<script src="{{ url_for('static', filename='js/punchin.js', v='7') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='22') }}"></script>
+<script src="{{ url_for('static', filename='js/punchin.js', v='10') }}"></script>
+<script src="{{ url_for('static', filename='js/monthly.js', v='1') }}"></script>
 </body>
 </html>
