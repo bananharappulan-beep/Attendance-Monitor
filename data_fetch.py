@@ -1,78 +1,42 @@
+"""ESSL -> Neon.
+
+For every ESSL location this downloads the Daily Attendance Report for the last FETCH_DAYS days
+(default 40, ending today), then REPLACES that location's Neon table with the fresh rows in one
+transaction. Finally every table is cleaned of rows older than the window. Run it daily:
+
+    python data_fetch.py
+"""
 import json
 import logging
 import os
 import re
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import pandas as pd
-import gspread
-from dotenv import load_dotenv
-from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
+
+import db
+from config import Config
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("attendance.data_fetch")
 
 BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")
 
 URL      = os.environ.get("ESSL_URL", "http://www.esslcloud.com/OASIS/")
 USER     = os.environ.get("ESSL_USER", "essl")
 PASS     = os.environ.get("ESSL_PASS", "essl")
 HEADLESS = os.environ.get("HEADLESS", "1") == "1"
 
-SHEET_ID = os.environ["SHEET_ID"]
-
-GOOGLE_CREDS = os.environ.get("GOOGLE_CREDS") or os.environ.get(
-    "GOOGLE_CREDENTIALS", "service-account.json"
-)
-GOOGLE_CREDS_INFO = None
-if GOOGLE_CREDS.lstrip().startswith("{"):
-    GOOGLE_CREDS_INFO = json.loads(GOOGLE_CREDS)
-else:
-    if not os.path.isabs(GOOGLE_CREDS):
-        GOOGLE_CREDS = str(BASE_DIR / GOOGLE_CREDS)
-    if not os.path.exists(GOOGLE_CREDS):
-        raise FileNotFoundError(
-            "Service-account credentials are missing. Set GOOGLE_CREDS or "
-            "GOOGLE_CREDENTIALS to the JSON content or path to a JSON file."
-        )
-
-# ESSL location name  ->  Google Sheet worksheet name
-LOCATION_MAP = {
-    "Manjeri Branch": "MANJERI",
-    "KASARGOD":       "KASARGOD",
-    "Kannur":         "KANNUR",
-    "KINASSERI":      "KOZHIKODE",
-    "KUTTIYADI":      "KUTTIYADI",
-    "TIRUR":          "TIRUR",
-    "PALAKKAD":       "PALAKKAD",
-    "THRISSUR":       "THRISSUR",
-    "Alapuzha":       "ALAPPUZHA",
-    "KOLLAM":         "KOLLAM",
-    "Attingal":       "TRIVANDRUM",
-    "MARTHANDAM":     "MARTHANDAM",
-    "NAGPUR":         "NAGPUR",
-    "Hyderabad":      "HYDERABAD",
-    "BANGALORE":      "BANGALORE",
-    "MERCHX MJR":     "MERCHX MANJERI",
-    "MANJERI HU":     "HU MANJERI",
-    "FCO MANJERI":    "FCO MANJERI",
-    "HEAD OFFICE":    "HEAD OFFICE",
-    "Manjeri fr":     "MANJERI FR",
-    "MANJERI R&D":    "MANJERI R&D",
-}
-
-# Report date = yesterday (run on the 30th -> 29th to 29th)
-report_day = date.today() - timedelta(days=1)
-D, M, Y = str(report_day.day), report_day.strftime("%b"), str(report_day.year)
+LOCATION_MAP = db.LOCATION_MAP          # ESSL location name -> branch tab (-> Neon table)
 PROGRESS_FILE = BASE_DIR / ".data_fetch_progress.json"
 
 
-def _save_progress(remaining, fetch_complete=False):
+# ---------------------------------------------------------------- progress (resume after failure)
+def _save_progress(window, remaining, fetch_complete=False):
     state = {
-        "report_date": report_day.isoformat(),
+        "window": window,
         "remaining": remaining,
         "fetch_complete": fetch_complete,
     }
@@ -81,7 +45,8 @@ def _save_progress(remaining, fetch_complete=False):
     os.replace(temporary, PROGRESS_FILE)
 
 
-def _load_progress():
+def _load_progress(window):
+    """-> (locations still to fetch, resuming?)  A new day = a new window = start over."""
     if not PROGRESS_FILE.exists():
         return list(LOCATION_MAP), False
     try:
@@ -89,7 +54,7 @@ def _load_progress():
     except (OSError, json.JSONDecodeError) as error:
         raise RuntimeError(f"Could not read fetch progress file: {error}") from error
 
-    if state.get("report_date") != report_day.isoformat():
+    if state.get("window") != window:
         return list(LOCATION_MAP), False
     if state.get("fetch_complete") is True:
         return [], True
@@ -104,6 +69,19 @@ def _load_progress():
     return list(dict.fromkeys(remaining)), True
 
 
+def _windows(start, end, chunk_days):
+    """Split start..end into pieces of at most chunk_days (0 = one piece)."""
+    if chunk_days <= 0:
+        return [(start, end)]
+    pieces, current = [], start
+    while current <= end:
+        stop = min(end, current + timedelta(days=chunk_days - 1))
+        pieces.append((current, stop))
+        current = stop + timedelta(days=1)
+    return pieces
+
+
+# ---------------------------------------------------------------- ESSL browser steps
 def open_report_form(page):
     page.get_by_text("Reports", exact=True).first.hover()
     page.wait_for_timeout(1500)
@@ -173,7 +151,8 @@ def _login_error_details(page):
     return "; ".join(details)
 
 
-def download_for_location(page, loc, path):
+def download_for_location(page, loc, path, start, end):
+    """Download the Daily Attendance Report (CSV) for `loc` from `start` to `end` (inclusive)."""
     frame = open_report_form(page)
 
     # 1. Tick Filter Employee and pick the location first
@@ -184,9 +163,13 @@ def download_for_location(page, loc, path):
     # 2. Tick Recalculate Attendance
     tick(frame, "Recalculate Attendance")
 
-    # 3. Dates and CSV Export last (so nothing resets them)
+    # 3. From / To dates and CSV Export last (so nothing resets them)
     sel = frame.locator("select")
-    for i, lab in [(1, D), (2, M), (3, Y), (4, D), (5, M), (6, Y)]:
+    labels = [
+        (1, str(start.day)), (2, start.strftime("%b")), (3, str(start.year)),
+        (4, str(end.day)),   (5, end.strftime("%b")),   (6, str(end.year)),
+    ]
+    for i, lab in labels:
         try:
             sel.nth(i).select_option(label=lab)
         except Exception as e:
@@ -207,42 +190,70 @@ def download_for_location(page, loc, path):
             pass
         raise RuntimeError(f"No download. Form message: {err or 'none'}")
     d.value.save_as(path)
-    print("Downloaded:", path)
+    print(f"Downloaded {start} to {end}:", path)
 
 
-def push_to_sheet(spreadsheet, tab_name, df):
-    try:
-        ws = spreadsheet.worksheet(tab_name)
-    except gspread.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=tab_name, rows=1000, cols=40)
-        print("Created new tab:", tab_name)
-    df = df.fillna("").astype(str)
-    values = [df.columns.tolist()] + df.values.tolist()
-    ws.clear()                                   # delete existing data first
-    ws.update(range_name="A1", values=values)    # then add the new data
-    print(f"Sheet updated: {tab_name} ({len(df)} rows)")
+def _read_csv(path):
+    return pd.read_csv(path, dtype=str, keep_default_na=False,
+                       encoding="utf-8-sig", encoding_errors="replace")
 
+
+# ---------------------------------------------------------------- Neon
+def push_to_neon(tab_name, df):
+    """Replace the branch table with the fetched rows. Returns the number of rows stored."""
+    rows, stats = db.prepare_rows(df)
+    table = db.table_name(tab_name)
+    if stats["bad_date"] or stats["no_code"] or stats["duplicates"]:
+        print(
+            f"{tab_name}: skipped {stats['bad_date']} row(s) without a valid date, "
+            f"{stats['no_code']} without an employee code; {stats['duplicates']} duplicate(s) merged."
+        )
+    if not rows:
+        # Never wipe a table because of an empty / unreadable report.
+        print(f"{tab_name}: ESSL returned no usable rows - existing data in '{table}' kept.")
+        return 0
+    with db.session() as conn:
+        removed = db.replace_rows(conn, table, rows)
+    print(f"Neon updated: {table} ({removed} old rows replaced by {len(rows)} new rows)")
+    return len(rows)
+
+
+def cleanup(start):
+    """Daily cleanup: remove everything older than the window from every branch table."""
+    with db.session() as conn:
+        removed = db.cleanup_old(conn, start)
+    print(f"Cleanup: {removed} row(s) older than {start} deleted.")
+    return removed
+
+
+# ---------------------------------------------------------------- main job
 def run(retain_progress=False):
-    pending_locations, resuming = _load_progress()
+    start, end = db.fetch_window()
+    window = f"{start.isoformat()}..{end.isoformat()}"
+    pieces = _windows(start, end, Config.FETCH_CHUNK_DAYS)
+
+    pending_locations, resuming = _load_progress(window)
     if resuming and not pending_locations:
-        print(f"Fetch for {report_day} is complete; resuming the status-matrix update.")
+        print(f"Fetch for {window} is complete; nothing more to do.")
         return
     if resuming:
         print(
-            f"Resuming fetch for {report_day}; {len(pending_locations)} location(s) remain: "
+            f"Resuming fetch for {window}; {len(pending_locations)} location(s) remain: "
             + ", ".join(pending_locations)
         )
     else:
-        print(f"Starting fetch for {report_day}; {len(pending_locations)} locations.")
-    _save_progress(pending_locations)
+        print(f"Starting fetch for {window} ({Config.FETCH_DAYS} days); "
+              f"{len(pending_locations)} locations.")
 
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds = (
-        Credentials.from_service_account_info(GOOGLE_CREDS_INFO, scopes=scopes)
-        if GOOGLE_CREDS_INFO is not None
-        else Credentials.from_service_account_file(GOOGLE_CREDS, scopes=scopes)
-    )
-    spreadsheet = gspread.authorize(creds).open_by_key(SHEET_ID)
+    # Fail fast (before opening ESSL) if Neon is unreachable or a table is missing.
+    with db.session() as conn:
+        missing = db.missing_tables(conn)
+    if missing:
+        raise RuntimeError(
+            "These Neon tables do not exist: " + ", ".join(missing)
+            + ". Run attendance_tables.sql in the Neon SQL Editor first."
+        )
+    _save_progress(window, pending_locations)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=HEADLESS, args=["--no-sandbox"])
@@ -268,37 +279,44 @@ def run(retain_progress=False):
 
             failed_locations = []
             for essl_loc in list(pending_locations):
-                sheet_tab = LOCATION_MAP[essl_loc]
+                tab = LOCATION_MAP[essl_loc]
                 safe = re.sub(r"[^A-Za-z0-9]+", "_", essl_loc)
-                path = BASE_DIR / f"report_{safe}.csv"
-                print(f"Fetching {essl_loc} -> {sheet_tab}...", flush=True)
+                print(f"Fetching {essl_loc} -> {db.table_name(tab)}...", flush=True)
+                frames = []
                 try:
-                    download_for_location(page, essl_loc, str(path))
-                    df = pd.read_csv(path)
-                    print(f"{essl_loc} -> {sheet_tab}: {len(df)} rows for {report_day}")
-                    push_to_sheet(spreadsheet, sheet_tab, df)
+                    for piece_start, piece_end in pieces:
+                        path = BASE_DIR / f"report_{safe}.csv"
+                        try:
+                            download_for_location(page, essl_loc, str(path), piece_start, piece_end)
+                            frames.append(_read_csv(path))
+                        finally:
+                            path.unlink(missing_ok=True)
+                            print("CSV removed:", path.name)
+                    df = pd.concat(frames, ignore_index=True)
+                    print(f"{essl_loc} -> {tab}: {len(df)} rows for {window}")
+                    push_to_neon(tab, df)
                     pending_locations.remove(essl_loc)
-                    _save_progress(pending_locations)
+                    _save_progress(window, pending_locations)
                     print(f"Completed {essl_loc}.", flush=True)
                 except Exception:
                     failed_locations.append(essl_loc)
-                    log.exception("Failed to fetch or upload ESSL report for %s", essl_loc)
+                    log.exception("Failed to fetch or store ESSL report for %s", essl_loc)
                     print(f"FAILED {essl_loc}; it will be retried.", flush=True)
-                finally:
-                    path.unlink(missing_ok=True)
-                    print("CSV removed:", path.name)
             if failed_locations:
-                _save_progress(failed_locations)
+                _save_progress(window, failed_locations)
+                cleanup(start)
                 raise RuntimeError(
                     "ESSL data fetch failed for locations: "
                     + ", ".join(failed_locations)
                 )
         finally:
             browser.close()
-        _save_progress([], fetch_complete=True)
-        print(f"Fetch for {report_day} completed successfully.", flush=True)
-        if not retain_progress:
-            PROGRESS_FILE.unlink(missing_ok=True)
+
+    cleanup(start)
+    _save_progress(window, [], fetch_complete=True)
+    print(f"Fetch for {window} completed successfully.", flush=True)
+    if not retain_progress:
+        PROGRESS_FILE.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

@@ -1,12 +1,13 @@
-"""Attendance Monitor - Flask backend (Google Sheets storage).
+"""Attendance Monitor - Flask backend (Neon PostgreSQL storage).
 
 API
   GET /api/branches           -> ["KANNUR", ...]
   GET /api/data?branch=NAME   -> [{d, code, name, inT, outT, dur}, ...]
   GET /api/sync               -> {"rows": N, "branches": M}
-                                 (re-read source sheet + back-fill P/H/A matrix in the output sheet)
+                                 (re-read Neon and refresh the dashboard cache)
 
-Archive and ESSL fetch are started manually by a developer from the Sync sidebar.
+ESSL -> Neon runs every day at FETCH_HOUR:FETCH_MINUTE (last 40 days, old rows cleaned up) and can
+also be started manually by a developer from the Sync sidebar.
 """
 import gzip
 import json
@@ -17,11 +18,12 @@ import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, Response, jsonify, redirect, render_template, request, stream_with_context
 from flask_cors import CORS
 
 import auth
-import sheets_sync
+import neon_sync
 from config import Config
 
 logging.basicConfig(level=logging.INFO)
@@ -53,6 +55,50 @@ def _compress_json_response(response):
     return response
 
 
+def _scheduled_fetch():
+    """Daily job: ESSL -> Neon (last 40 days replaced, older rows deleted), then refresh the cache."""
+    if not _sync_action_lock.acquire(blocking=False):
+        log.warning("Scheduled ESSL fetch skipped: another sync action is running.")
+        return
+    try:
+        log.info("Scheduled ESSL fetch started.")
+        result = subprocess.run(
+            [sys.executable, "-u", "-c", "import data_fetch; data_fetch.run()"],
+            cwd=str(Path(__file__).resolve().parent),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=4 * 60 * 60,
+        )
+        tail = "\n".join((result.stdout or "").splitlines()[-25:])
+        if result.returncode:
+            log.error("Scheduled ESSL fetch failed (exit %s). Last output:\n%s", result.returncode, tail)
+        else:
+            log.info("Scheduled ESSL fetch finished. Last output:\n%s", tail)
+        neon_sync.sync()            # show whatever was stored, even after a partial failure
+    except Exception:
+        log.exception("Scheduled ESSL fetch crashed")
+    finally:
+        _sync_action_lock.release()
+
+
+def start_scheduler():
+    if not Config.AUTO_FETCH:
+        log.info("Automatic daily fetch is off (AUTO_FETCH=0).")
+        return None
+    scheduler = BackgroundScheduler(timezone=Config.TIMEZONE)
+    scheduler.add_job(
+        _scheduled_fetch, "cron", hour=Config.FETCH_HOUR, minute=Config.FETCH_MINUTE,
+        id="daily_essl_fetch", coalesce=True, max_instances=1, misfire_grace_time=3600,
+    )
+    scheduler.start()
+    log.info("Daily ESSL fetch scheduled at %02d:%02d (%s).",
+             Config.FETCH_HOUR, Config.FETCH_MINUTE, Config.TIMEZONE)
+    return scheduler
+
+
 def create_app():
     app = Flask(__name__)
     CORS(app, resources={r"/api/*": {"origins": Config.CORS_ORIGINS}})
@@ -70,14 +116,14 @@ def create_app():
         return jsonify({"error": msg}), 403
 
     def _empty_matrix_for_branch(branch):
-        skipped = {name.casefold() for name in sheets_sync.OUTPUT_SKIP_TABS}
+        skipped = {name.casefold() for name in neon_sync.OUTPUT_SKIP_TABS}
         return {"dates": [], "rows": []} if branch.casefold() in skipped else None
 
     @app.get("/api/branches")
     @auth.login_required
     def branches():
         try:
-            return jsonify(auth.filter_branches(auth.current_user(), sheets_sync.get_branches()))
+            return jsonify(auth.filter_branches(auth.current_user(), neon_sync.get_branches()))
         except Exception as e:
             return jsonify({"error": str(e)})
 
@@ -89,7 +135,7 @@ def create_app():
         if not auth.can_view_tab(user, "daily", "summary", "punchin") or not auth.branch_allowed(user, branch):
             return _deny()
         try:
-            rows = sheets_sync.get_branch_data(branch)
+            rows = neon_sync.get_branch_data(branch)
             if not auth.can_change_date(user):
                 rows = auth.latest_date_only(rows)      # date locked -> latest day only
             return jsonify(rows)
@@ -100,7 +146,7 @@ def create_app():
     @auth.login_required
     def refresh_data():
         try:
-            rows, branches = sheets_sync.refresh_cache()
+            rows, branches = neon_sync.refresh_cache()
             return jsonify({"rows": rows, "branches": branches})
         except Exception as e:
             log.exception("Manual data refresh failed")
@@ -117,7 +163,7 @@ def create_app():
             empty_matrix = _empty_matrix_for_branch(branch)
             if empty_matrix is not None:
                 return jsonify(empty_matrix)
-            result = sheets_sync.get_current_matrix(branch)
+            result = neon_sync.get_current_matrix(branch)
             if not auth.can_change_date(user):
                 result = auth.limit_matrix_to_latest_month(result)
             return jsonify(result)
@@ -135,7 +181,7 @@ def create_app():
             empty_matrix = _empty_matrix_for_branch(branch)
             if empty_matrix is not None:
                 return jsonify(empty_matrix)
-            matrix = sheets_sync.get_saved_matrix(branch)
+            matrix = neon_sync.get_saved_matrix(branch)
             latest_status_date = max(
                 (
                     day
@@ -181,7 +227,7 @@ def create_app():
             empty_matrix = _empty_matrix_for_branch(branch)
             if empty_matrix is not None:
                 return jsonify(empty_matrix)
-            return jsonify(sheets_sync.get_saved_matrix(branch))
+            return jsonify(neon_sync.get_saved_matrix(branch))
         except Exception as e:
             log.exception("Attendance matrix fetch failed")
             return jsonify({"error": str(e)}), 500
@@ -204,7 +250,7 @@ def create_app():
                     output_branches.append(branch)
                 else:
                     matrices[branch] = empty_matrix
-            matrices.update(sheets_sync.get_saved_matrices(output_branches))
+            matrices.update(neon_sync.get_saved_matrices(output_branches))
             return jsonify(matrices)
         except Exception as e:
             log.exception("Attendance matrices fetch failed")
@@ -216,10 +262,13 @@ def create_app():
         if not _sync_action_lock.acquire(blocking=False):
             return jsonify({"error": "A sync action is already running."}), 409
         try:
-            sheets_sync.archive_yesterday()
-            return jsonify({"ok": True, "message": "Yesterday's attendance was archived."})
+            removed = neon_sync.cleanup_old()
+            return jsonify({
+                "ok": True,
+                "message": f"Cleanup done: {removed} row(s) older than the 40-day window removed.",
+            })
         except Exception as e:
-            log.exception("Developer archive failed")
+            log.exception("Developer cleanup failed")
             return jsonify({"error": str(e)}), 500
         finally:
             _sync_action_lock.release()
@@ -272,14 +321,14 @@ def create_app():
                     })
                     return
 
-                yield event("log", {"message": "Updating the attendance status matrix..."})
-                rows, branches = sheets_sync.sync()
+                yield event("log", {"message": "Refreshing the dashboard from Neon..."})
+                rows, branches = neon_sync.sync()
                 progress_file = Path(__file__).resolve().with_name(".data_fetch_progress.json")
                 progress_file.unlink(missing_ok=True)
                 yield event("log", {
-                    "message": f"Status matrix updated: {rows} rows across {branches} branches."
+                    "message": f"Dashboard refreshed: {rows} rows across {branches} branches."
                 })
-                yield event("done", {"ok": True, "message": "Data fetch and matrix update completed."})
+                yield event("done", {"ok": True, "message": "ESSL data stored in Neon."})
             except GeneratorExit:
                 if process is not None and process.poll() is None:
                     process.terminate()
@@ -302,12 +351,12 @@ def create_app():
         return response
 
     @app.get("/api/sync")
-    @auth.roles_required("developer", "admin")          # writes to the output sheet
+    @auth.roles_required("developer", "admin")          # re-reads Neon
     def sync_now():
         if not _sync_action_lock.acquire(blocking=False):
             return jsonify({"error": "A sync action is already running."}), 409
         try:
-            rows, branches = sheets_sync.sync()
+            rows, branches = neon_sync.sync()
             return jsonify({"rows": rows, "branches": branches})
         except Exception as e:
             log.exception("Manual sync failed")
@@ -319,6 +368,7 @@ def create_app():
 
 
 app = create_app()
+scheduler = start_scheduler()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=Config.PORT, debug=True, use_reloader=False)

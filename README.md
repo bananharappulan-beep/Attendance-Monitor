@@ -1,73 +1,42 @@
-# Attendance Monitor (Flask + Google Sheets)
+# Attendance Monitor (Flask + Neon PostgreSQL)
 
-Python Flask backend + plain HTML / CSS / JavaScript front end. No database.
+ESSL -> **Neon** (one table per branch) -> dashboard. Google Sheets is no longer used.
 
-* **Source sheet** (`SHEET_ID`) - raw punch data, one tab per branch (read only).
-* **Optional Head Office source** (`CORE_OFFICE_SHEET_ID`) - additional raw punch tabs, merged by tab name (read only).
-* **Output sheet** (`OUTPUT_SHEET_ID`) - the saved status matrix, **one worksheet per branch**:
+## How the data flows
+1. `data_fetch.py` logs in to ESSL and, for each of the 21 locations, downloads the *Daily Attendance
+   Report* (CSV) for the **last 40 days ending today**.
+2. Each branch table is **replaced** with the fresh rows in one transaction (old rows deleted + new rows
+   inserted together, so the dashboard never sees a half-empty table). An empty or unreadable report never
+   wipes a table.
+3. **Daily cleanup:** after the fetch, every table is trimmed of rows older than the 40-day window.
+4. `neon_sync.py` reads the tables for the dashboard. The P/H/A matrix is calculated from the stored punch
+   rows (P = more than 5h, H = 4h through 5h, A = less than 4h / no record / punch-in after 14:00), so
+   there is no separate output sheet any more.
 
-```
-EMP CODE | EMP NAME | 27-09-2026 | 28-09-2026 | 29-09-2026 | 30-09-2026
-M123     | BANA     | A          | P          |            |
-```
-
-P = worked more than 5h, H = 4h through 5h inclusive, A = less than 4h, no record, or punch-in after 14:00.
-A blank cell means there are no attendance records for that date yet.
-Each sync updates the dates found in the source and keeps the dates already saved.
-
-## Structure
-```
-app.py            Flask app, API routes, background sync scheduler
-config.py         Settings read from .env
-sheets_sync.py    Read source sheet, calculate P/H/A, save matrix to the output sheet
-templates/index.html
-static/css/style.css
-static/js/app.js
-```
+The job runs automatically every day at `FETCH_HOUR:FETCH_MINUTE` (default 04:00, `TIMEZONE`) while the app
+is running, and manually from the developer **Sync** sidebar (Fetch Data = fetch + replace + cleanup;
+Archive = cleanup only). It can also be run on its own, e.g. from cron: `python data_fetch.py`.
 
 ## Setup
-1. **Service account**: Google Cloud Console -> create a project -> enable *Google Sheets API* ->
-   create a service account -> Keys -> Add key -> JSON. Save the file next to `app.py`.
-2. **Source sheet(s)**: share each source sheet with the service account's email (`client_email` inside the JSON) as *Viewer*.
-3. **Output sheet**: create a NEW empty Google Sheet, share it with the same email as *Editor*,
-   and copy its ID from the URL (`https://docs.google.com/spreadsheets/d/<THIS-PART>/edit`).
-4. Install and configure:
-   ```
-   python -m venv venv
-   venv\Scripts\activate           # macOS/Linux: source venv/bin/activate
-   pip install -r requirements.txt
-   copy .env.example .env          # macOS/Linux: cp .env.example .env
-   ```
-   Edit `.env`: set `GOOGLE_CREDENTIALS` and `OUTPUT_SHEET_ID`. To sync the separate Head Office branches sheet, set `CORE_OFFICE_SHEET_ID` to its spreadsheet ID.
-5. Run:
-   ```
-   python app.py
-   ```
-   Open http://localhost:8080. Archive and ESSL data fetches are started manually by a developer
-   from the **SYNC** section in the sidebar. Fetch output streams to the page; after a failed run,
-   clicking **Fetch Data** again retries only locations that have not completed.
+1. In the Neon SQL Editor run `attendance_tables.sql` (click **Run**, not Explain). It creates the 21 tables.
+2. `pip install -r requirements.txt` and `playwright install chromium` (the Docker image already has it).
+3. Copy `.env.example` to `.env` and set `DATABASE_URL`, `ESSL_USER`, `ESSL_PASS`.
+4. `python app.py` -> http://localhost:8080. Production: `gunicorn -w 1 -b 0.0.0.0:8080 app:app`
+   (keep a single worker so the daily scheduler and in-memory cache run once).
 
-Production: `gunicorn -w 1 -b 0.0.0.0:8080 app:app`
-(use a single worker to keep in-memory dashboard caches consistent).
-On Render, add `GOOGLE_CREDENTIALS` as an environment secret containing the service-account
-JSON content. The Docker image intentionally excludes `service-account.json`; `data_fetch.py`
-accepts this secret directly (or `GOOGLE_CREDS` if configured separately).
+## Fetch window
+`FETCH_DAYS=40` and `FETCH_END_OFFSET_DAYS=0` give: from = today - 39 days, to = today.
+Example (6 Oct 2026): 28 Aug 2026 .. 6 Oct 2026. Set `FETCH_END_OFFSET_DAYS=1` to end yesterday instead.
+
+## Tables
+`kollam, alappuzha, kannur, nagpur, hyderabad, palakkad, trivandrum, manjeri_fr, manjeri, kuttiyadi,
+kasargod, marthandam, tirur, head_office, hu_manjeri, merchx_manjeri, kozhikode, thrissur, manjeri_r_d,
+bangalore, fco_manjeri` - unique on (`attendance_date`, `employee_code`).
+
+ESSL location -> table mapping lives in `db.py` (`LOCATION_MAP`). Dashboard branch names are built per row
+from the table and the Company column (e.g. `manjeri` + company ALIMS -> `ALIMS MANJERI`); `head_office`,
+`manjeri_r_d`, `manjeri_fr`, `fco_manjeri` keep their plain names.
 
 ## API
-The browser keeps successful API GET responses in memory for 30 seconds (up to 200 entries)
-and shares in-flight requests. The dashboard's Refresh button and a successful manual sync clear
-this cache; sync requests themselves are never cached.
-
-| Route | Description |
-|---|---|
-| `GET /api/branches` | List of branches |
-| `GET /api/data?branch=NAME` | Attendance rows for a branch |
-| `GET /api/matrix?branch=NAME` | Saved matrix history overlaid with the latest source-sheet attendance |
-| `GET /api/sync` | Re-read the source and save the matrix to the output sheet |
-| `GET /api/attendance-matrix?branch=NAME` | Saved attendance history used by the frontend to identify inactive employees |
-| `GET /api/attendance-matrices?branch=NAME&branch=NAME` | Batch-read saved attendance history for summary reports |
-| `POST /api/developer/archive` | Archive yesterday's attendance (developer only) |
-| `POST /api/developer/fetch-data` | Stream ESSL fetch logs and update the status matrix (developer only) |
-
-The source tabs need these header columns (tab name = branch):
-`Date`, `Employee Code`, `Employee Name`, `In Time`, `Out Time`.
+Same routes as before. `GET /api/sync` and `POST /api/refresh` re-read Neon; `POST /api/developer/archive`
+runs the cleanup; `POST /api/developer/fetch-data` streams the ESSL fetch log.

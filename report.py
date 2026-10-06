@@ -19,7 +19,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-import sheets_sync as S
+import neon_sync as S
 
 LATE_AFTER = 9 * 60 + 10
 EARLY_BEFORE = 17 * 60

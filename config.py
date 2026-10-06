@@ -4,7 +4,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Always read the .env that sits next to this file (not whatever folder the server was started
-# from), and let it override any stale/empty variable already set in the Windows environment.
+# from), and let it override any stale/empty variable already set in the environment.
 ENV_FILE = Path(__file__).resolve().with_name(".env")
 load_dotenv(ENV_FILE, override=True)
 
@@ -16,25 +16,28 @@ def _get(name, default=""):
 class Config:
     PORT = int(_get("PORT", "8080"))
 
-    GOOGLE_CREDENTIALS = _get("GOOGLE_CREDENTIALS", "/path/to/service-account.json")
+    # ---- Neon (PostgreSQL) -------------------------------------------------------------
+    # Neon console -> Connect -> copy the connection string, e.g.
+    #   postgresql://user:password@ep-xxxx.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
+    DATABASE_URL = _get("DATABASE_URL")
 
-    # Source: raw punch data (one tab per branch). Read only.
-    SHEET_ID = _get("SHEET_ID", "1MkAWVc_f5TOA1y96PJolQ4wCAu2shLKVPrpjMGvRll0")
-    # Optional second source for Head Office branches. Read only.
-    CORE_OFFICE_SHEET_ID = _get("CORE_OFFICE_SHEET_ID")
-    # Output: P/H/A matrix (one worksheet per branch). Read + write.
-    OUTPUT_SHEET_ID = _get("OUTPUT_SHEET_ID")
+    # ---- ESSL fetch window -------------------------------------------------------------
+    # The window ends on (today - FETCH_END_OFFSET_DAYS) and covers FETCH_DAYS days in total,
+    # e.g. today = 6 Oct, FETCH_DAYS = 40 -> 28 Aug .. 6 Oct.
+    FETCH_DAYS = max(1, int(_get("FETCH_DAYS", "40")))
+    FETCH_END_OFFSET_DAYS = max(0, int(_get("FETCH_END_OFFSET_DAYS", "0")))
+    # 0 = ask ESSL for the whole window in ONE report. If ESSL ever rejects a long range,
+    # set e.g. FETCH_CHUNK_DAYS=10 and the window is fetched in 10-day pieces instead.
+    FETCH_CHUNK_DAYS = max(0, int(_get("FETCH_CHUNK_DAYS", "0")))
 
-    SKIP_TABS = [t.strip() for t in _get("SKIP_TABS").split(",") if t.strip()]
-
-    # How often the dashboard cache is refreshed from the source sheet (minutes, 0 = off).
-    # This does NOT write to the output sheet.
-    SYNC_INTERVAL_MINUTES = float(_get("SYNC_INTERVAL_MINUTES", "5"))
-
-    # Daily archive time (24h clock) and timezone
-    ARCHIVE_HOUR = int(_get("ARCHIVE_HOUR", "13"))
-    ARCHIVE_MINUTE = int(_get("ARCHIVE_MINUTE", "8"))
+    # ---- Daily automatic fetch (runs inside the web app) --------------------------------
+    AUTO_FETCH = _get("AUTO_FETCH", "1") == "1"
+    FETCH_HOUR = int(_get("FETCH_HOUR", "4"))
+    FETCH_MINUTE = int(_get("FETCH_MINUTE", "0"))
     TIMEZONE = _get("TIMEZONE", "Asia/Kolkata")
+
+    # How long the dashboard keeps the Neon rows in memory before re-reading (seconds, 0 = never).
+    CACHE_TTL_SECONDS = max(0, int(_get("CACHE_TTL_SECONDS", "300")))
 
     CORS_ORIGINS = _get("CORS_ORIGINS", "*")
 

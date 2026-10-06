@@ -1,4 +1,4 @@
-import sheets_sync
+import neon_sync
 import pandas as pd
 
 
@@ -6,12 +6,12 @@ class METRIX:
     @staticmethod
     def get_metrix_dataframe():
         frames = {}
-        skipped_branches = {branch.casefold() for branch in sheets_sync.OUTPUT_SKIP_TABS}
+        skipped_branches = {branch.casefold() for branch in neon_sync.OUTPUT_SKIP_TABS}
         branches = [
-            branch for branch in sheets_sync.get_branches()
+            branch for branch in neon_sync.get_branches()
             if branch.casefold() not in skipped_branches
         ]
-        matrices = sheets_sync.get_saved_matrices(branches)
+        matrices = neon_sync.get_saved_matrices(branches)
         for branch, matrix in matrices.items():
             records = [
                 {
