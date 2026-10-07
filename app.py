@@ -9,18 +9,26 @@ API
 ESSL -> Neon runs every day at FETCH_HOUR:FETCH_MINUTE (last 40 days, old rows cleaned up) and can
 also be started manually by a developer from the Sync sidebar.
 """
+import copy
 import gzip
+import hashlib
 import json
 import logging
 import subprocess
 import sys
 import threading
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, Response, jsonify, redirect, render_template, request, stream_with_context
 from flask_cors import CORS
+
+try:
+    import brotli               # optional: pip install brotli (smaller than gzip)
+except ImportError:
+    brotli = None
 
 import auth
 import neon_sync
@@ -29,6 +37,39 @@ from config import Config
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("attendance")
 _sync_action_lock = threading.Lock()
+
+# ---------- Data version + backend cache ----------
+# Everything read from Neon is cached in memory and kept until the stored data changes.
+# Every place that changes the data (daily ESSL fetch, manual fetch, sync, refresh, cleanup)
+# calls _bump_version(), which drops the cache and gives the front end a new version id.
+_version_lock = threading.Lock()
+_version = uuid.uuid4().hex
+_cache = {}
+
+
+def _data_version():
+    return _version
+
+
+def _bump_version():
+    global _version
+    with _version_lock:
+        _version = uuid.uuid4().hex
+        _cache.clear()
+    log.info("Data changed -> cache cleared (version %s).", _version[:8])
+
+
+def _cached(key, loader):
+    version = _version
+    cache_key = (version,) + tuple(key)
+    if cache_key in _cache:
+        return _cache[cache_key]
+    value = loader()
+    with _version_lock:
+        if version == _version:         # data did not change while loading
+            _cache[cache_key] = value
+    return value
+
 
 def _compress_json_response(response):
     """Gzip sizeable JSON API responses when the client supports it."""
@@ -41,17 +82,29 @@ def _compress_json_response(response):
     ):
         return response
 
+    response.headers["X-Data-Version"] = _data_version()
     body = response.get_data()
+    if request.method == "GET" and response.status_code == 200 and request.path.startswith("/api/"):
+        # ETag lets the browser revalidate: unchanged data -> empty 304 instead of the full JSON
+        response.set_etag(hashlib.sha1(body).hexdigest(), weak=True)
+        response.headers["Cache-Control"] = "private, no-cache"
+        response.make_conditional(request)
+        if response.status_code == 304:
+            return response
     if len(body) < 1024:
         return response
 
     response.vary.add("Accept-Encoding")
-    if request.accept_encodings.best_match(["gzip"]) != "gzip":
+    accepted = request.accept_encodings
+    if brotli is not None and accepted.quality("br"):
+        encoding, compressed = "br", brotli.compress(body, quality=5)
+    elif accepted.quality("gzip"):
+        encoding, compressed = "gzip", gzip.compress(body, compresslevel=6, mtime=0)
+    else:
         return response
 
-    response.set_data(gzip.compress(body, compresslevel=5, mtime=0))
-    response.headers["Content-Encoding"] = "gzip"
-    response.headers.pop("ETag", None)
+    response.set_data(compressed)
+    response.headers["Content-Encoding"] = encoding
     return response
 
 
@@ -78,6 +131,7 @@ def _scheduled_fetch():
         else:
             log.info("Scheduled ESSL fetch finished. Last output:\n%s", tail)
         neon_sync.sync()            # show whatever was stored, even after a partial failure
+        _bump_version()
     except Exception:
         log.exception("Scheduled ESSL fetch crashed")
     finally:
@@ -101,7 +155,9 @@ def start_scheduler():
 
 def create_app():
     app = Flask(__name__)
-    CORS(app, resources={r"/api/*": {"origins": Config.CORS_ORIGINS}})
+    app.json.compact = True         # no indent/extra spaces (debug=True otherwise pretty-prints JSON)
+    app.json.ensure_ascii = False   # send UTF-8 names as-is instead of \uXXXX escapes
+    CORS(app, resources={r"/api/*": {"origins": Config.CORS_ORIGINS, "expose_headers": ["X-Data-Version"]}})
     app.after_request(_compress_json_response)
 
     auth.init_app(app)          # login, roles, users.json, /login, /api/me, /api/users ...
@@ -119,11 +175,17 @@ def create_app():
         skipped = {name.casefold() for name in neon_sync.OUTPUT_SKIP_TABS}
         return {"dates": [], "rows": []} if branch.casefold() in skipped else None
 
+    @app.get("/api/version")
+    @auth.login_required
+    def data_version():
+        return jsonify({"version": _data_version()})
+
     @app.get("/api/branches")
     @auth.login_required
     def branches():
         try:
-            return jsonify(auth.filter_branches(auth.current_user(), neon_sync.get_branches()))
+            return jsonify(auth.filter_branches(
+                auth.current_user(), _cached(("branches",), neon_sync.get_branches)))
         except Exception as e:
             return jsonify({"error": str(e)})
 
@@ -135,9 +197,9 @@ def create_app():
         if not auth.can_view_tab(user, "daily", "summary", "punchin") or not auth.branch_allowed(user, branch):
             return _deny()
         try:
-            rows = neon_sync.get_branch_data(branch)
+            rows = _cached(("data", branch), lambda: neon_sync.get_branch_data(branch))
             if not auth.can_change_date(user):
-                rows = auth.latest_date_only(rows)      # date locked -> latest day only
+                rows = auth.latest_date_only(copy.deepcopy(rows))   # date locked -> latest day only
             return jsonify(rows)
         except Exception as e:
             return jsonify({"error": str(e)})
@@ -147,6 +209,7 @@ def create_app():
     def refresh_data():
         try:
             rows, branches = neon_sync.refresh_cache()
+            _bump_version()
             return jsonify({"rows": rows, "branches": branches})
         except Exception as e:
             log.exception("Manual data refresh failed")
@@ -163,9 +226,9 @@ def create_app():
             empty_matrix = _empty_matrix_for_branch(branch)
             if empty_matrix is not None:
                 return jsonify(empty_matrix)
-            result = neon_sync.get_current_matrix(branch)
+            result = _cached(("matrix", branch), lambda: neon_sync.get_current_matrix(branch))
             if not auth.can_change_date(user):
-                result = auth.limit_matrix_to_latest_month(result)
+                result = auth.limit_matrix_to_latest_month(copy.deepcopy(result))
             return jsonify(result)
         except Exception as e:
             return jsonify({"error": str(e)})
@@ -181,7 +244,7 @@ def create_app():
             empty_matrix = _empty_matrix_for_branch(branch)
             if empty_matrix is not None:
                 return jsonify(empty_matrix)
-            matrix = neon_sync.get_saved_matrix(branch)
+            matrix = _cached(("saved", branch), lambda: neon_sync.get_saved_matrix(branch))
             latest_status_date = max(
                 (
                     day
@@ -227,7 +290,7 @@ def create_app():
             empty_matrix = _empty_matrix_for_branch(branch)
             if empty_matrix is not None:
                 return jsonify(empty_matrix)
-            return jsonify(neon_sync.get_saved_matrix(branch))
+            return jsonify(_cached(("saved", branch), lambda: neon_sync.get_saved_matrix(branch)))
         except Exception as e:
             log.exception("Attendance matrix fetch failed")
             return jsonify({"error": str(e)}), 500
@@ -250,7 +313,9 @@ def create_app():
                     output_branches.append(branch)
                 else:
                     matrices[branch] = empty_matrix
-            matrices.update(neon_sync.get_saved_matrices(output_branches))
+            matrices.update(_cached(
+                ("saved-many",) + tuple(output_branches),
+                lambda: neon_sync.get_saved_matrices(output_branches)))
             return jsonify(matrices)
         except Exception as e:
             log.exception("Attendance matrices fetch failed")
@@ -263,6 +328,7 @@ def create_app():
             return jsonify({"error": "A sync action is already running."}), 409
         try:
             removed = neon_sync.cleanup_old()
+            _bump_version()
             return jsonify({
                 "ok": True,
                 "message": f"Cleanup done: {removed} row(s) older than the 40-day window removed.",
@@ -323,6 +389,7 @@ def create_app():
 
                 yield event("log", {"message": "Refreshing the dashboard from Neon..."})
                 rows, branches = neon_sync.sync()
+                _bump_version()
                 progress_file = Path(__file__).resolve().with_name(".data_fetch_progress.json")
                 progress_file.unlink(missing_ok=True)
                 yield event("log", {
@@ -357,6 +424,7 @@ def create_app():
             return jsonify({"error": "A sync action is already running."}), 409
         try:
             rows, branches = neon_sync.sync()
+            _bump_version()
             return jsonify({"rows": rows, "branches": branches})
         except Exception as e:
             log.exception("Manual sync failed")

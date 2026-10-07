@@ -1,6 +1,6 @@
 /* Punch-in Report: summary cards, bar chart and slot table. Uses the theme variables from style.css. */
 
-#punchin .hint { margin-bottom: .6rem; }
+#punchin .hint, #punchout .hint { margin-bottom: .6rem; }
 .punchin-cards { grid-template-columns: repeat(4, 1fr); }
 .punchin-cards .card .sub { margin-top: .1rem; font-size: .72rem; color: var(--muted, #6f6a58); min-height: 1.1em; }
 .punchin-cards .card .value.small { font-size: 1.15rem; padding: .3rem 0; }
@@ -68,3 +68,24 @@
 .monthly-bar i.h { background: var(--amber-fg, #b45309); }
 .monthly-bar i.a { background: var(--red, #b3382e); }
 @media (max-width: 600px) { .monthly-cards { grid-template-columns: 1fr; } }
+
+/* Loading skeletons (cards + charts) */
+@keyframes sk-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.sk {
+  display: block; border-radius: 6px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--border, rgba(74, 65, 40, .14)) 70%, transparent) 25%,
+    color-mix(in srgb, var(--gold, #c9a24b) 24%, transparent) 50%,
+    color-mix(in srgb, var(--border, rgba(74, 65, 40, .14)) 70%, transparent) 75%);
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.4s linear infinite;
+}
+.skeleton-card { display: flex; flex-direction: column; align-items: center; gap: .55rem; padding: 1rem .8rem; }
+.skeleton-card .sk-label { width: 42%; height: .7rem; }
+.skeleton-card .sk-value { width: 28%; height: 1.7rem; }
+.skeleton-card .sk-sub { width: 58%; height: .6rem; }
+.chart-skeleton { display: flex; align-items: flex-end; gap: 1.2%; height: 300px; padding: 1rem .5rem .5rem 2.5rem; border-bottom: 1px solid var(--border, rgba(74, 65, 40, .14)); }
+.chart-skeleton .sk { flex: 1 1 0; border-radius: 4px 4px 0 0; }
+.pie-skeleton { display: flex; align-items: center; justify-content: center; min-height: 360px; }
+.pie-skeleton .sk { width: 240px; height: 240px; border-radius: 50%; }
+@media (prefers-reduced-motion: reduce) { .sk { animation: none; } }

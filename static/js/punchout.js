@@ -1,14 +1,21 @@
-// Punch-in Report: how many employees punched in during each 30-minute slot.
-// Loaded after app.js and reuses its helpers ($, api, toMin, employeeIdentity, ...).
-// Scope rules (business, location type, date) mirror the Overall Summary, so the totals agree.
+// Punch-out Report: how many employees punched out during each 30-minute slot.
+// Mirror of the Punch-in Report. Loaded after app.js and punchin.js and reuses their helpers
+// ($, api, toMin, fixOut, employeeIdentity, ...). Scope rules (business, location type, date,
+// inactive employees) are identical to the Punch-in Report, so the totals agree.
+//
+// Counted: employees who punched IN on the selected date (they are the ones who can punch out).
+//   - a punch-out time  -> the slot that contains it
+//   - punched in, no punch-out -> "No punch-out"
+// Employees with no punch at all that day (absent) are not part of this chart; the "Not in" note
+// under the first card shows how many they are.
 (function () {
   'use strict';
 
   // ---------- Slots ----------
-  const START = 8 * 60 + 30;                    // first slot begins at 08:30
-  const END = 14 * 60;                          // slots run until 14:00
+  const START = 16 * 60;                        // first slot begins at 04:00 PM
+  const END = 20 * 60;                          // slots run until 08:00 PM
   const STEP = 30;                              // minutes per slot
-  const SLOT_COUNT = (END - START) / STEP;      // 11
+  const SLOT_COUNT = (END - START) / STEP;      // 8
 
   const clock = m => `${Math.floor(m / 60) % 12 || 12}:${String(m % 60).padStart(2, '0')}`;
   const meridiem = m => (m % 1440) < 720 ? 'AM' : 'PM';
@@ -17,52 +24,49 @@
     : `${clock(s)} ${meridiem(s)} – ${clock(e)} ${meridiem(e)}`;
   const axisRange = (s, e) => `${clock(s)}–${clock(e)}${s >= 720 ? ' pm' : ''}`;
 
-  const BUCKETS = [{ kind: 'early', label: 'Before 8:30 AM', axis: 'Before 8:30' }];
+  const BUCKETS = [{ kind: 'early', label: `Before ${clock(START)} PM`, axis: `Before ${clock(START)}` }];
   for (let i = 0; i < SLOT_COUNT; i++) {
     const s = START + i * STEP, e = s + STEP;
     BUCKETS.push({ kind: 'slot', label: fullRange(s, e), axis: axisRange(s, e) });
   }
-  BUCKETS.push({ kind: 'after', label: '2:00 PM or later', axis: '2:00 pm or later' });
-  BUCKETS.push({ kind: 'none', label: 'No punch-in', axis: 'No punch-in' });
+  BUCKETS.push({ kind: 'after', label: `${clock(END)} PM or later`, axis: `${clock(END)} pm or later` });
+  BUCKETS.push({ kind: 'none', label: 'No punch-out', axis: 'No punch-out' });
   const IDX_AFTER = SLOT_COUNT + 1;
   const IDX_NONE = SLOT_COUNT + 2;
 
-  function bucketIndex(inM) {
-    if (inM == null) return IDX_NONE;
-    if (inM < START) return 0;
-    if (inM >= END) return IDX_AFTER;
-    return 1 + Math.floor((inM - START) / STEP);
+  function bucketIndex(outM) {
+    if (outM == null) return IDX_NONE;
+    if (outM < START) return 0;
+    if (outM >= END) return IDX_AFTER;
+    return 1 + Math.floor((outM - START) / STEP);
   }
 
   // ---------- State ----------
-  let model = null;       // { date, scope, all, rows }
+  let model = null;       // { date, scope, all, rows, ... }
   let branchKey = 'ALL';  // 'ALL' or a branch row key ('b:<SOURCE NAME>')
   let followTop = true;   // true: the graph follows the Branch dropdown at the top of the page
+  let loadToken = 0;
+  const ALL_VALUE = '__ALL__';   // the "ALL" entry added to the top Branch dropdown by punchin.js
 
-  // "ALL" entry in the top Branch dropdown. It only exists while the Punch-in Report is open,
-  // because the other tabs need one real branch.
-  const ALL_VALUE = '__ALL__';
-  let lastReal = '';      // last real branch chosen, restored when leaving the Punch-in Report
+  const $id = id => document.getElementById(id);
+  const text = s => String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const emptyCounts = () => new Array(BUCKETS.length).fill(0);
+  const pct = (n, d) => d ? `${Math.round((n / d) * 100)}%` : '0%';
+  const blank = (key, label) => ({ key, label, counts: emptyCounts(), total: 0, early: 0, away: 0 });
 
-  function addAllOption() {
-    const top = $id('branch');
-    if (!top) return;
-    if (top.value && top.value !== ALL_VALUE) lastReal = top.value;
-    if ([...top.options].some(o => o.value === ALL_VALUE)) return;
-    const option = document.createElement('option');
-    option.value = ALL_VALUE;
-    option.textContent = 'ALL';
-    top.insertBefore(option, top.firstChild);
+  function addInto(target, row) {
+    row.counts.forEach((n, i) => { target.counts[i] += n; });
+    target.total += row.total;
+    target.early += row.early;
+    target.away += row.away;
   }
 
-  function removeAllOption() {
+  // Row key of the branch currently chosen in the top Branch dropdown.
+  function topBranchKey() {
     const top = $id('branch');
-    const option = top && [...top.options].find(o => o.value === ALL_VALUE);
-    if (!option) return;
-    const wasSelected = top.value === ALL_VALUE;
-    option.remove();
-    if (wasSelected || !top.value)
-      top.value = [...top.options].some(o => o.value === lastReal) ? lastReal : (top.options[0]?.value || '');
+    const source = top && top.value !== ALL_VALUE && top.selectedOptions[0]?.dataset.source;
+    return source ? `b:${String(source).toUpperCase()}` : 'ALL';
   }
 
   function syncTopBranch() {
@@ -75,26 +79,6 @@
     const match = [...top.options].find(o => `b:${String(o.dataset.source).toUpperCase()}` === branchKey);
     if (match) top.value = match.value;
   }
-
-  // Row key of the branch currently chosen in the top Branch dropdown.
-  function topBranchKey() {
-    const source = $id('branch') && $id('branch').value !== ALL_VALUE && $id('branch').selectedOptions[0]?.dataset.source;
-    return source ? `b:${String(source).toUpperCase()}` : 'ALL';
-  }
-  let loadToken = 0;
-
-  const $id = id => document.getElementById(id);
-  const text = s => String(s).replace(/[&<>"']/g, c =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const emptyCounts = () => new Array(BUCKETS.length).fill(0);
-  const pct = (n, d) => d ? `${Math.round((n / d) * 100)}%` : '0%';
-
-  function addInto(target, row) {
-    row.counts.forEach((n, i) => { target.counts[i] += n; });
-    target.total += row.total;
-    target.late += row.late;
-  }
-  const blank = (key, label) => ({ key, label, counts: emptyCounts(), total: 0, late: 0 });
 
   // ---------- Data ----------
   async function collect() {
@@ -126,9 +110,11 @@
       active.forEach(employee => {
         const punch = day.get(employeeIdentity(employee));
         const inM = punch ? toMin(punch.inT) : null;
-        row.counts[bucketIndex(inM)]++;
+        const outM = punch ? fixOut(inM, toMin(punch.outT), punch.outT) : null;
+        if (inM == null && outM == null) { row.away++; return; }      // no punch at all: absent
+        row.counts[bucketIndex(outM)]++;
         row.total++;
-        if (inM != null && inM > LATE_AFTER) row.late++;
+        if (outM != null && outM < EARLY_BEFORE) row.early++;
       });
       return [branch.toUpperCase(), row];
     }));
@@ -154,12 +140,11 @@
       group.rows.forEach(row => addInto(sum, row));
       return { ...group, sum };
     });
-    const all_ = blank('ALL', 'All branches');
-    [...new Map(visible.flatMap(group => group.rows).map(row => [row.key, row])).values()]
-      .forEach(row => addInto(all_, row));
-
     const rows = [...new Map(visible.flatMap(group => group.rows).map(row => [row.key, row])).values()];
-    // Business-wise counts (MAGNUS branch + core office are combined), used for the expanded tooltip.
+    const all_ = blank('ALL', 'All branches');
+    rows.forEach(row => addInto(all_, row));
+
+    // Business-wise counts (MAGNUS branch + core office combined), used for the expanded tooltip.
     const byBusiness = new Map();
     visible.forEach(group => {
       const name = group.label.split(':')[0];
@@ -177,12 +162,12 @@
   }
 
   function renderCards(scope) {
-    const punched = scope.total - scope.counts[IDX_NONE];
+    const out = scope.total - scope.counts[IDX_NONE];
     const peak = peakOf(scope.counts);
-    $id('punchinCards').innerHTML = [
-      ['Punched in', punched, `of ${scope.total} active (${pct(punched, scope.total)})`, ''],
-      [`Late after ${clock(LATE_AFTER)}`, scope.late, `${pct(scope.late, punched)} of punch-ins`, ''],
-      ['No punch-in', scope.counts[IDX_NONE], `${pct(scope.counts[IDX_NONE], scope.total)} of active`, ''],
+    $id('punchoutCards').innerHTML = [
+      ['Punched out', out, `of ${scope.total} who punched in (${pct(out, scope.total)})` + (scope.away ? ` · ${scope.away} not in` : ''), ''],
+      [`Left before ${clock(EARLY_BEFORE)} PM`, scope.early, `${pct(scope.early, out)} of punch-outs`, ''],
+      ['No punch-out', scope.counts[IDX_NONE], `${pct(scope.counts[IDX_NONE], scope.total)} of those who punched in`, ''],
       ['Busiest slot', peak < 0 ? '—' : BUCKETS[peak].label, peak < 0 ? '' : `${scope.counts[peak]} employees`, ' small']
     ].map(([label, value, sub, cls]) =>
       `<div class="card"><div class="label">${text(label)}</div><div class="value${cls}">${text(value)}</div><div class="sub">${text(sub)}</div></div>`
@@ -196,6 +181,7 @@
     return Math.max(1, (frac <= 1 ? 1 : frac <= 2 ? 2 : frac <= 5 ? 5 : 10) * pow);
   }
 
+  // Plain SVG chart, used only when the Highcharts CDN cannot be loaded.
   function renderChartSvg(scope, byBusiness) {
     const W = 920, H = 340, L = 46, R = 14, T = 44, B = 84;
     const iw = W - L - R, ih = H - T - B;
@@ -206,7 +192,7 @@
     const y = v => T + ih - (v / top) * ih;
     const peak = peakOf(scope.counts);
 
-    let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-labelledby="punchinChartTitle">`;
+    let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-labelledby="punchoutChartTitle">`;
     for (let v = 0; v <= top; v += step) {
       svg += `<line class="pb-grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/>`
         + `<text class="pb-tick" x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
@@ -214,9 +200,9 @@
     BUCKETS.forEach((bucket, i) => {
       const v = scope.counts[i];
       const cx = L + i * band + band / 2;
-      const cls = i === peak ? 'peak' : bucket.kind;
+      const cls = i === peak ? 'peak' : bucket.kind === 'early' ? 'after' : bucket.kind;
       let tip = `${bucket.label}: ${v} employee${v === 1 ? '' : 's'} (${pct(v, scope.total)} of ${scope.total})`;
-      if (byBusiness && v > 0)       // ALL BUSINESS view: add the business-wise split
+      if (byBusiness && v > 0)
         tip += byBusiness.filter(b => b.counts[i] > 0).map(b => `\n${b.label}: ${b.counts[i]}`).join('');
       svg += `<g class="pb-col"><title>${text(tip)}</title>`
         + `<rect class="pb-hit" x="${L + i * band}" y="${T}" width="${band}" height="${ih}"/>`
@@ -225,13 +211,13 @@
         + `</g>`
         + `<text class="pb-axis" transform="translate(${cx + 4},${T + ih + 16}) rotate(-35)" text-anchor="end">${text(bucket.axis)}</text>`;
     });
-    if (LATE_AFTER >= START && LATE_AFTER < END) {
-      const x = L + (1 + (LATE_AFTER - START) / STEP) * band;
+    if (EARLY_BEFORE >= START && EARLY_BEFORE < END) {
+      const x = L + (1 + (EARLY_BEFORE - START) / STEP) * band;
       svg += `<line class="pb-late" x1="${x}" x2="${x}" y1="${T - 16}" y2="${T + ih}"/>`
-        + `<text class="pb-late-label" x="${x + 5}" y="${T - 22}">Late after ${clock(LATE_AFTER)}</text>`;
+        + `<text class="pb-late-label" x="${x + 5}" y="${T - 22}">Early before ${clock(EARLY_BEFORE)} PM</text>`;
     }
     svg += `<line class="pb-base" x1="${L}" x2="${W - R}" y1="${T + ih}" y2="${T + ih}"/></svg>`;
-    $id('punchinChart').innerHTML = svg;
+    $id('punchoutChart').innerHTML = svg;
   }
 
   // ---------- Highcharts ----------
@@ -243,21 +229,21 @@
   function renderChart(scope, byBusiness) {
     if (!window.Highcharts) return renderChartSvg(scope, byBusiness);   // CDN blocked: use the built-in SVG chart
     destroyChart();
-    const box = $id('punchinChart');
+    const box = $id('punchoutChart');
     box.innerHTML = '';
 
     const css = getComputedStyle(document.documentElement);
     const v = (name, fallback) => (css.getPropertyValue(name) || '').trim() || fallback;
     const col = {
-      slot: v('--navy-soft', '#16403d'), peak: v('--gold', '#c9a24b'), after: v('--red', '#b3382e'),
-      none: v('--faint', '#9a937c'), late: v('--late', '#b45309'), text: v('--text', '#1b2b29'),
+      slot: v('--navy-soft', '#16403d'), peak: v('--gold', '#c9a24b'), early: v('--red', '#b3382e'),
+      none: v('--faint', '#9a937c'), line: v('--late', '#b45309'), text: v('--text', '#1b2b29'),
       muted: v('--muted', '#6f6a58'), border: v('--border', 'rgba(74, 65, 40, .14)'),
       surface: v('--surface', '#ffffff')
     };
     const peak = peakOf(scope.counts);
-    const colorOf = (bucket, i) => i === peak ? col.peak : bucket.kind === 'after' ? col.after : bucket.kind === 'none' ? col.none : col.slot;
+    const colorOf = (bucket, i) => i === peak ? col.peak : bucket.kind === 'early' ? col.early : bucket.kind === 'none' ? col.none : col.slot;
     const plural = n => `${n} employee${n === 1 ? '' : 's'}`;
-    const lateX = 1 + (LATE_AFTER - START) / STEP - 0.5;      // axis units: category i is centred on i
+    const lineX = 1 + (EARLY_BEFORE - START) / STEP - 0.5;      // axis units: category i is centred on i
 
     chart = Highcharts.chart(box, {
       chart: { type: 'column', height: 340, backgroundColor: 'transparent', spacing: [18, 10, 10, 6],
@@ -268,10 +254,10 @@
         lineColor: col.muted, tickLength: 0,
         labels: { rotation: -35, style: { color: col.muted, fontSize: '11px' } },
         crosshair: { color: 'rgba(201, 162, 75, .12)' },
-        plotLines: (LATE_AFTER >= START && LATE_AFTER < END) ? [{
-          value: lateX, color: col.late, width: 1.5, dashStyle: 'Dash', zIndex: 5,
-          label: { text: `Late after ${clock(LATE_AFTER)}`, rotation: 0, x: 5, y: 12,
-                   style: { color: col.late, fontWeight: '700', fontSize: '11px' } }
+        plotLines: (EARLY_BEFORE >= START && EARLY_BEFORE < END) ? [{
+          value: lineX, color: col.line, width: 1.5, dashStyle: 'Dash', zIndex: 5,
+          label: { text: `Early before ${clock(EARLY_BEFORE)} PM`, rotation: 0, x: 5, y: 12,
+                   style: { color: col.line, fontWeight: '700', fontSize: '11px' } }
         }] : []
       },
       yAxis: {
@@ -310,71 +296,6 @@
     });
   }
 
-  // ---------- Present / Absent pie (Highcharts) ----------
-  let presenceChart = null;
-  function destroyPresenceChart() {
-    if (presenceChart) { try { presenceChart.destroy(); } catch (e) { /* ignore */ } presenceChart = null; }
-  }
-
-  function renderPresenceChart(scope, byBusiness, scopeName) {
-    const box = $id('presenceChart');
-    if (!box) return;
-    destroyPresenceChart();
-    box.innerHTML = '';
-    const present = scope.total - scope.counts[IDX_NONE];
-    const absent = scope.counts[IDX_NONE];
-    $id('presenceHint').textContent = model.date ? `Present and absent for ${dmy(model.date)} (${scopeName}).` : '';
-    $id('presenceTitle').textContent = `Present vs Absent · ${scopeName}`;
-    if (!window.Highcharts) {
-      box.innerHTML = `<div class="empty">Present: ${present} · Absent: ${absent} (Highcharts could not be loaded)</div>`;
-      return;
-    }
-    const css = getComputedStyle(document.documentElement);
-    const v = (name, fallback) => (css.getPropertyValue(name) || '').trim() || fallback;
-    const col = { present: v('--green-fg', '#1f6b4a'), absent: v('--red', '#b3382e'), text: v('--text', '#1b2b29'),
-                  muted: v('--muted', '#6f6a58'), border: v('--border', 'rgba(74, 65, 40, .14)'),
-                  surface: v('--surface', '#ffffff'), gold: v('--gold', '#c9a24b') };
-    const plural = n => `${n} employee${n === 1 ? '' : 's'}`;
-    const businessCount = (b, key) => key === 'present' ? b.total - b.counts[IDX_NONE] : b.counts[IDX_NONE];
-
-    presenceChart = Highcharts.chart(box, {
-      chart: { type: 'pie', height: 360, backgroundColor: 'transparent', style: { fontFamily: getComputedStyle(box).fontFamily } },
-      title: { text: null },
-      credits: { enabled: false }, legend: { enabled: false },
-      tooltip: {
-        useHTML: true, outside: true, borderRadius: 8, borderColor: col.gold, backgroundColor: col.surface,
-        shadow: false, style: { color: col.text, fontSize: '12px' },
-        formatter() {
-          const key = this.point.options.key, n = this.y;
-          let html = `<div style="min-width:150px"><b>${key === 'present' ? 'Present' : 'Absent (no punch-in)'}</b><br>`
-            + `${plural(n)} (${pct(n, scope.total)} of ${scope.total})`;
-          if (byBusiness && n > 0) {            // ALL BUSINESS view only: business-wise split
-            const parts = byBusiness.filter(b => businessCount(b, key) > 0);
-            html += `<table style="width:100%;margin-top:6px;border-top:1px solid ${col.border};border-collapse:collapse">`
-              + parts.map(b => `<tr><td style="padding:2px 0">${text(b.label)}</td>`
-                + `<td style="padding:2px 0 2px 16px;text-align:right;font-weight:700">${businessCount(b, key)}</td></tr>`).join('')
-              + '</table>';
-          }
-          return html + '</div>';
-        }
-      },
-      plotOptions: {
-        pie: {
-          borderWidth: 3, borderColor: col.surface, center: ['50%', '50%'], size: '80%',
-          states: { inactive: { opacity: 1 } }, animation: { duration: 250 },
-          dataLabels: {
-            enabled: true, distance: 16, style: { color: col.text, fontSize: '12px', fontWeight: '600', textOutline: 'none' },
-            formatter() { return this.y ? `${this.point.name}: ${this.y} (${pct(this.y, scope.total)})` : null; }
-          }
-        }
-      },
-      series: [{ name: 'Employees', data: [
-        { name: 'Present', key: 'present', y: present, color: col.present },
-        { name: 'Absent', key: 'absent', y: absent, color: col.absent }
-      ] }]
-    });
-  }
-
   // Decide which branch to chart: the top Branch dropdown, or the whole Business selection.
   function resolveBranch() {
     if (followTop) branchKey = topBranchKey();
@@ -387,41 +308,36 @@
     const row = branchKey === 'ALL' ? null : model.rows.find(r => r.key === branchKey);
     const scope = row || model.all;
     const scopeName = row ? `${row.label} (${model.scope})` : model.scope;
-    if (!model.all.total) return showMessage('No data for the selected Business Name / Business Type.', false);
-    $id('punchinHint').textContent = model.date ? `Punch-in times for ${dmy(model.date)} (${scopeName}).` : '';
-    $id('punchinChartTitle').textContent = `Employees by punch-in time · ${row ? row.label : model.scope}`;
+    if (!model.all.total && !model.all.away)
+      return showMessage('No data for the selected Business Name / Business Type.', false);
+    $id('punchoutHint').textContent = model.date
+      ? `Punch-out times for ${dmy(model.date)} (${scopeName}).`
+        + (scope.total ? '' : ' Nobody punched in on this date (weekly off / holiday?).')
+      : '';
+    $id('punchoutChartTitle').textContent = `Employees by punch-out time · ${row ? row.label : model.scope}`;
     renderCards(scope);
-    const split = model.allBusinesses && !row ? model.byBusiness : null;
-    renderChart(scope, split);
-    renderPresenceChart(scope, split, scopeName);
+    renderChart(scope, model.allBusinesses && !row ? model.byBusiness : null);
   }
 
   function showMessage(message, isError) {
-    $id('punchinCards').innerHTML = '';
-    $id('punchinChartTitle').textContent = 'Employees by punch-in time';
-    destroyPresenceChart();
-    if ($id('presenceChart')) $id('presenceChart').innerHTML = `<div class="empty">${isError ? 'Error: ' : ''}${text(message)}</div>`;
-    if ($id('presenceTitle')) $id('presenceTitle').textContent = 'Present vs Absent';
+    $id('punchoutCards').innerHTML = '';
+    $id('punchoutChartTitle').textContent = 'Employees by punch-out time';
     destroyChart();
-    $id('punchinChart').innerHTML = `<div class="empty">${isError ? 'Error: ' : ''}${text(message)}</div>`;
+    $id('punchoutChart').innerHTML = `<div class="empty">${isError ? 'Error: ' : ''}${text(message)}</div>`;
   }
 
   // Loading state: shimmering placeholder cards + chart instead of a plain "Loading…" text.
   const skeletonBars = [38, 62, 84, 100, 76, 52, 44, 30, 22, 16, 12, 8, 6];
   function showLoading() {
-    $id('punchinCards').innerHTML = `<div class="card skeleton-card" aria-hidden="true"><div class="sk sk-label"></div><div class="sk sk-value"></div><div class="sk sk-sub"></div></div>`.repeat(4);
-    $id('punchinChartTitle').textContent = 'Employees by punch-in time';
+    $id('punchoutCards').innerHTML = `<div class="card skeleton-card" aria-hidden="true"><div class="sk sk-label"></div><div class="sk sk-value"></div><div class="sk sk-sub"></div></div>`.repeat(4);
+    $id('punchoutChartTitle').textContent = 'Employees by punch-out time';
     destroyChart();
-    $id('punchinChart').innerHTML = '<div class="chart-skeleton" role="status" aria-label="Loading">'
+    $id('punchoutChart').innerHTML = '<div class="chart-skeleton" role="status" aria-label="Loading">'
       + skeletonBars.map(h => `<i class="sk" style="height:${h}%"></i>`).join('') + '</div>';
-    destroyPresenceChart();
-    if ($id('presenceChart')) $id('presenceChart').innerHTML = '<div class="pie-skeleton" role="status" aria-label="Loading"><i class="sk"></i></div>';
-    if ($id('presenceTitle')) $id('presenceTitle').textContent = 'Present vs Absent';
   }
 
-  async function loadPunchin() {
+  async function loadPunchout() {
     const token = ++loadToken;
-    addAllOption();
     showLoading();
     try {
       const result = await collect();
@@ -437,10 +353,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     // Top Branch dropdown -> graph shows that branch.
     const top = $id('branch');
-    if (top) top.addEventListener('change', () => {
-      followTop = true;
-      if (top.value !== ALL_VALUE) lastReal = top.value;
-    }, true);
+    if (top) top.addEventListener('change', () => { followTop = true; }, true);
     // Business Name / Business Type -> graph shows the whole selection until a branch is picked.
     ['businessName', 'locationType'].forEach(id => {
       const el = $id(id);
@@ -448,25 +361,19 @@
     });
   });
 
-  document.addEventListener('attendance-theme-change', () => {
-    if (model) render();
-  });
+  document.addEventListener('attendance-theme-change', () => { if (model) render(); });
 
-  // Add / remove the ALL entry as the Punch-in Report is opened / closed (before the other tabs read the dropdown).
+  // Opening the tab: follow the top Branch dropdown again and fit the chart to its container.
   if (typeof window.showTab === 'function') {
-    const originalShowTab = window.showTab;
+    const previousShowTab = window.showTab;
     window.showTab = function (tab) {
-      if (tab === 'punchin' || tab === 'presence') { followTop = true; addAllOption(); }
-      else if (tab === 'punchout') addAllOption();
-      else if (tab === 'monthly') addAllOption();
-      else removeAllOption();
-      const result = originalShowTab.apply(this, arguments);
-      if (tab === 'punchin' || tab === 'presence') setTimeout(() => { if (chart) chart.reflow(); if (presenceChart) presenceChart.reflow(); }, 0);
+      if (tab === 'punchout') followTop = true;
+      const result = previousShowTab.apply(this, arguments);
+      if (tab === 'punchout') setTimeout(() => { if (chart) chart.reflow(); }, 0);
       return result;
     };
   }
 
-  window.loadPunchin = loadPunchin;
-  window.addAllBranchOption = addAllOption;
-  window.punchinOpen = () => ['punchin', 'presence'].some(id => { const el = $id(id); return Boolean(el) && !el.classList.contains('hidden'); });
+  window.loadPunchout = loadPunchout;
+  window.punchoutOpen = () => { const el = $id('punchout'); return Boolean(el) && !el.classList.contains('hidden'); };
 })();

@@ -53,11 +53,13 @@ window.addEventListener('load', async () => {
     businessSelect.disabled = true;
   }
   document.querySelectorAll('.tab[data-tab]').forEach(button =>
-    button.classList.toggle('hidden', !permissions.tabs.includes(['presence', 'monthly'].includes(button.dataset.tab) ? 'punchin' : button.dataset.tab))
+    button.classList.toggle('hidden', !permissions.tabs.includes(['presence', 'monthly', 'punchout'].includes(button.dataset.tab) ? 'punchin' : button.dataset.tab))
   );
   // hide the whole Reports group when none of its reports is allowed
   $('reportsGroup')?.classList.toggle('hidden', !document.querySelector('#reportsOptions .tab[data-tab]:not(.hidden)'));
   if (!permissions.download) $('exportActions').classList.add('hidden');
+  dateLocked = !permissions.change_date;
+  $('date').value = defaultDate([]);      // show yesterday straight away, before any data loads
   if (!permissions.change_date) {
     ['date', 'from', 'to'].forEach(id => {
       const element = $(id);
@@ -93,6 +95,21 @@ const fmt12 = m => {                                                            
   return p2(h % 12 || 12) + ':' + p2(m % 60) + ' ' + (h < 12 ? 'AM' : 'PM');
 };
 const dmy = iso => iso.split('-').reverse().join('-');
+
+// Default report date = YESTERDAY (today's punches are still incomplete). If yesterday has no
+// data it falls back to the newest earlier date that has data, then to the newest date overall.
+function defaultDate(dates) {
+  const t = new Date();
+  t.setDate(t.getDate() - 1);
+  const yesterday = `${t.getFullYear()}-${p2(t.getMonth() + 1)}-${p2(t.getDate())}`;
+  // Normal users always get yesterday. Users whose date is locked only receive the latest day
+  // of data, so they fall back to the newest date that actually has data.
+  if (!dateLocked) return yesterday;
+  const sorted = [...new Set(dates)].filter(Boolean).sort();
+  if (!sorted.length) return yesterday;
+  return sorted.includes(yesterday) ? yesterday : (sorted.filter(d => d <= yesterday).pop() || sorted.pop());
+}
+let dateLocked = false;
 const esc = s => String(s).replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -142,17 +159,36 @@ function employeeIdentity(row) {
 const pill = s => `<span class="pill ${s}">${s}</span>`;
 
 // ---------- API ----------
-const API_CACHE_TTL_MS = 30_000;
+// Responses are cached with NO expiry. They are dropped only when the server reports a new
+// data version (X-Data-Version header / /api/version), i.e. when the stored data changed.
 const API_CACHE_MAX_ENTRIES = 200;
 const apiResponseCache = new Map();
 const apiInflightRequests = new Map();
 let apiCacheGeneration = 0;
+let dataVersion = null;
 
 function clearApiCache() {
   apiCacheGeneration++;
   apiResponseCache.clear();
   apiInflightRequests.clear();
+  attendanceMatrices.clear();
 }
+
+function noteDataVersion(version) {
+  if (!version) return;
+  if (dataVersion && dataVersion !== version) clearApiCache();
+  dataVersion = version;
+}
+
+// Ask the server whether the data changed; reload the visible report only if it did.
+async function checkDataVersion() {
+  const before = dataVersion;
+  try { await api('/api/version', null, { cache: false }); } catch (e) { return; }
+  if (before && dataVersion !== before && $('syncPanel').classList.contains('hidden'))
+    refreshActiveView();
+}
+setInterval(checkDataVersion, 60_000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkDataVersion(); });
 
 async function api(path, params, options = {}) {
   const search = new URLSearchParams();
@@ -166,20 +202,22 @@ async function api(path, params, options = {}) {
   const useCache = options.cache !== false;
   const force = options.force === true;
   const cached = useCache && !force ? apiResponseCache.get(url) : null;
-  if (cached && cached.expiresAt > Date.now()) return cached.data;
-  if (cached) apiResponseCache.delete(url);
+  if (cached) return cached.data;
   if (useCache && !force && apiInflightRequests.has(url))
     return apiInflightRequests.get(url);
 
-  const generation = apiCacheGeneration;
+  let generation = apiCacheGeneration;
   const request = (async () => {
     try {
-      const res = await fetch(url, { method: options.method || 'GET', cache: 'no-store' });
+      // 'no-cache' = revalidate with the server's ETag (unchanged data comes back as an empty 304)
+      const res = await fetch(url, { method: options.method || 'GET', cache: 'no-cache' });
+      noteDataVersion(res.headers.get('X-Data-Version'));
+      generation = apiCacheGeneration;
       const data = await res.json();
       if (!res.ok) throw new Error((data && data.error) || `Request failed (${res.status})`);
       if (data && data.error) throw new Error(data.error);
       if (useCache && generation === apiCacheGeneration) {
-        apiResponseCache.set(url, { data, expiresAt: Date.now() + API_CACHE_TTL_MS });
+        apiResponseCache.set(url, { data });
         if (apiResponseCache.size > API_CACHE_MAX_ENTRIES)
           apiResponseCache.delete(apiResponseCache.keys().next().value);
       }
@@ -460,9 +498,8 @@ async function loadBranch() {
       attendanceMatrixError = error;
       console.error('Attendance history could not be loaded:', error);
     }
-    const latest = rows.map(r => r.d).sort().pop();
-    if (!$('date').value || !rows.some(r => r.d === $('date').value))
-      $('date').value = latest || new Date().toISOString().slice(0, 10);
+    if (!$('date').value || (dateLocked && !rows.some(r => r.d === $('date').value)))
+      $('date').value = defaultDate(rows.map(r => r.d));
     setMonthRange();
     renderDaily();
     if (!$('matrix').classList.contains('hidden')) await loadMatrix(sourceBranch);
@@ -480,7 +517,7 @@ function appendSyncLog(message) {
 }
 
 function showDeveloperSyncPanel(action) {
-  ['daily', 'matrix', 'inactive', 'summary', 'punchin', 'presence', 'monthly'].forEach(id => $(id)?.classList.add('hidden'));
+  ['daily', 'matrix', 'inactive', 'summary', 'punchin', 'punchout', 'presence', 'monthly'].forEach(id => $(id)?.classList.add('hidden'));
   $('syncPanel').classList.remove('hidden');
   $('employeeSearchRow').classList.add('hidden');
   document.querySelectorAll('.tab[data-tab]').forEach(button => button.classList.remove('active'));
@@ -571,8 +608,8 @@ $('reportsToggle')?.addEventListener('click', () =>
 function showTab(tab) {
   $('syncPanel').classList.add('hidden');
   document.querySelectorAll('.sync-action').forEach(button => button.classList.remove('active'));
-  ['daily', 'matrix', 'inactive', 'summary', 'punchin', 'presence', 'monthly'].forEach(id => $(id)?.classList.toggle('hidden', id !== tab));
-  $('employeeSearchRow').classList.toggle('hidden', ['summary', 'punchin', 'presence'].includes(tab));
+  ['daily', 'matrix', 'inactive', 'summary', 'punchin', 'punchout', 'presence', 'monthly'].forEach(id => $(id)?.classList.toggle('hidden', id !== tab));
+  $('employeeSearchRow').classList.toggle('hidden', ['summary', 'punchin', 'punchout', 'presence'].includes(tab));
   document.querySelectorAll('.tab[data-tab]').forEach(button =>
     button.classList.toggle('active', button.dataset.tab === tab)
   );
@@ -613,6 +650,7 @@ bind('date', 'onchange', () => {
   renderMatrix();
   if (!$('summary').classList.contains('hidden')) loadSummary();
   if (window.punchinOpen?.()) loadPunchin();
+  if (window.punchoutOpen?.()) loadPunchout();
   if (window.monthlyOpen?.()) loadMonthly();
 });
 bind('from', 'onchange', renderMatrix);
@@ -622,10 +660,14 @@ bind('exportSummaryPdf', 'onclick', exportSummaryPdf);
 async function refreshActiveView() {
   if (!$('branch').value) return;
   clearApiCache();
-  const activeTab = ['daily', 'matrix', 'inactive', 'summary', 'punchin', 'presence', 'monthly']
+  const activeTab = ['daily', 'matrix', 'inactive', 'summary', 'punchin', 'punchout', 'presence', 'monthly']
     .find(id => !$(`${id}`).classList.contains('hidden'));
   if (activeTab === 'punchin' || activeTab === 'presence') {
     await loadPunchin();
+    return;
+  }
+  if (activeTab === 'punchout') {
+    await loadPunchout();
     return;
   }
   if (activeTab === 'monthly') {
@@ -683,7 +725,7 @@ async function loadSummary() {
         data: await api('/api/data', { branch }, { cache: false })
       })))
     ]);
-    const date = $('date').value || all.flatMap(item => item.data.map(row => row.d)).sort().pop() || '';
+    const date = $('date').value || defaultDate(all.flatMap(item => item.data.map(row => row.d)));
     const selectedScope = allBusinesses
       ? 'ALL BUSINESSES'
       : selectedBusinessType === 'MAGNUS'

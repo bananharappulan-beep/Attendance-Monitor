@@ -6,7 +6,7 @@
   <title>Attendance Monitor</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='13') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css', v='4') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/punchin.css', v='5') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/punchin.css', v='7') }}">
 </head>
 <body>
 <div class="container">
@@ -89,6 +89,7 @@
           </button>
           <div id="reportsOptions" class="reports-options">
             <button data-tab="punchin" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>Punch-in Report</button>
+            <button data-tab="punchout" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l-3 2"/></svg>Punch-out Report</button>
             <button data-tab="presence" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/></svg>Present &amp; Absent</button>
             <button data-tab="monthly" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg>Monthly Status</button>
           </div>
@@ -171,6 +172,23 @@
       </div>
     </div>
   </section>
+  <section id="punchout" class="hidden">
+    <div class="hint" id="punchoutHint"></div>
+    <div id="punchoutCards" class="cards punchin-cards"></div>
+    <div class="card punchin-chart-card">
+      <div class="punchin-chart-head">
+        <h2 id="punchoutChartTitle">Employees by punch-out time</h2>
+      </div>
+      <div id="punchoutChart" class="punchin-chart"></div>
+      <div class="punchin-legend" aria-hidden="true">
+        <span><i style="background:var(--navy-soft)"></i>Punch-out slot</span>
+        <span><i style="background:var(--gold)"></i>Busiest slot</span>
+        <span><i style="background:var(--red)"></i>Before 4:00 PM</span>
+        <span><i style="background:var(--faint)"></i>No punch-out</span>
+        <span>Dashed line = early-leaving cut-off</span>
+      </div>
+    </div>
+  </section>
   <section id="presence" class="hidden">
     <div class="hint" id="presenceHint"></div>
     <div class="card punchin-chart-card">
@@ -207,8 +225,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highcharts/11.4.8/highcharts.js"></script>
 <script src="{{ url_for('static', filename='js/auth-ui.js', v='7') }}"></script>
-<script src="{{ url_for('static', filename='js/app.js', v='25') }}"></script>
-<script src="{{ url_for('static', filename='js/punchin.js', v='10') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='26') }}"></script>
+<script src="{{ url_for('static', filename='js/punchin.js', v='12') }}"></script>
+<script src="{{ url_for('static', filename='js/punchout.js', v='2') }}"></script>
 <script src="{{ url_for('static', filename='js/monthly.js', v='2') }}"></script>
 </body>
 </html>
