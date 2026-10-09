@@ -6,7 +6,8 @@ API
   GET /api/sync               -> {"rows": N, "branches": M}
                                  (re-read Neon and refresh the dashboard cache)
 
-ESSL -> Neon runs every day at FETCH_HOUR:FETCH_MINUTE (last 40 days, old rows cleaned up) and can
+ESSL -> Neon runs every day at FETCH_HOUR:FETCH_MINUTE (last N days, old rows cleaned up; N is set by a
+developer in Sync -> Fetch Days, default FETCH_DAYS) and can
 also be started manually by a developer from the Sync sidebar.
 """
 import copy
@@ -31,6 +32,7 @@ except ImportError:
     brotli = None
 
 import auth
+import db
 import neon_sync
 from config import Config
 
@@ -109,7 +111,7 @@ def _compress_json_response(response):
 
 
 def _scheduled_fetch():
-    """Daily job: ESSL -> Neon (last 40 days replaced, older rows deleted), then refresh the cache."""
+    """Daily job: ESSL -> Neon (the fetch window replaced, older rows deleted), then refresh the cache."""
     if not _sync_action_lock.acquire(blocking=False):
         log.warning("Scheduled ESSL fetch skipped: another sync action is running.")
         return
@@ -331,13 +333,64 @@ def create_app():
             _bump_version()
             return jsonify({
                 "ok": True,
-                "message": f"Cleanup done: {removed} row(s) older than the 40-day window removed.",
+                "message": f"Cleanup done: {removed} row(s) older than the {db.fetch_days()}-day window removed.",
             })
         except Exception as e:
             log.exception("Developer cleanup failed")
             return jsonify({"error": str(e)}), 500
         finally:
             _sync_action_lock.release()
+
+    def _fetch_settings():
+        start, end = db.fetch_window()
+        return {
+            "fetch_days": db.fetch_days(),
+            "default_days": Config.FETCH_DAYS,          # the .env value, used until a developer changes it
+            "min": Config.FETCH_DAYS_MIN,
+            "max": Config.FETCH_DAYS_MAX,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+        }
+
+    @app.get("/api/developer/settings")
+    @auth.roles_required("developer")
+    def developer_settings():
+        try:
+            return jsonify(_fetch_settings())
+        except Exception as e:
+            log.exception("Reading the fetch settings failed")
+            return jsonify({"error": str(e)}), 500
+
+    @app.post("/api/developer/settings")
+    @auth.roles_required("developer")
+    def developer_save_settings():
+        body = request.get_json(silent=True) or {}
+        raw = body.get("fetch_days")
+        lo, hi = Config.FETCH_DAYS_MIN, Config.FETCH_DAYS_MAX
+        try:
+            if isinstance(raw, bool) or (isinstance(raw, float) and not raw.is_integer()):
+                raise ValueError
+            days = int(str(raw).strip())
+        except ValueError:
+            return jsonify({"error": "Enter a whole number of days."}), 400
+        if not lo <= days <= hi:
+            return jsonify({"error": f"Days must be between {lo} and {hi}."}), 400
+        try:
+            before = db.fetch_days()
+            db.set_setting("fetch_days", days, auth.current_user()["username"])
+            result = _fetch_settings()
+        except Exception as e:
+            log.exception("Saving the fetch settings failed")
+            return jsonify({"error": str(e)}), 500
+        log.info("Developer %s set the fetch window to %d days (was %d).",
+                 auth.current_user()["username"], days, before)
+        message = f"Saved: the fetch window is now the last {days} days ({result['start']} to {result['end']})."
+        if days < before:
+            message += f" Rows dated before {result['start']} are deleted at the next fetch or Archive."
+        elif days > before:
+            message += " Click Fetch Data to load the longer window now."
+        result["message"] = message
+        return jsonify(result)
 
     @app.post("/api/developer/fetch-data")
     @auth.roles_required("developer")

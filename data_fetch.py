@@ -242,7 +242,7 @@ def run(retain_progress=False):
             + ", ".join(pending_locations)
         )
     else:
-        print(f"Starting fetch for {window} ({Config.FETCH_DAYS} days); "
+        print(f"Starting fetch for {window} ({(end - start).days + 1} days); "
               f"{len(pending_locations)} locations.")
 
     # Fail fast (before opening ESSL) if Neon is unreachable or a table is missing.

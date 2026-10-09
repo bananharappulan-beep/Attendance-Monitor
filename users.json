@@ -56,7 +56,8 @@
           "daily",
           "matrix",
           "inactive",
-          "summary"
+          "summary",
+          "punchin"
         ]
       },
       "password_hash": "scrypt:32768:8:1$KZmtKRYZxTMo7Awk$b24295b183eafe10d3202b24e88b2df6bf2a394012aa121687fd05a6e0c30eb09c47219f60d85cb1b55552257e64db524226fe4f92875a5ad471f52cd73de4b0",
@@ -64,7 +65,7 @@
       "must_change_password": false,
       "pw_changed": "2026-10-02T13:29:42",
       "created_at": "2026-10-02T13:29:42",
-      "updated_at": "2026-10-02T13:38:43"
+      "updated_at": "2026-10-08T16:21:24"
     },
     "alims": {
       "username": "alims",
@@ -78,7 +79,8 @@
           "daily",
           "matrix",
           "inactive",
-          "summary"
+          "summary",
+          "punchin"
         ]
       },
       "password_hash": "scrypt:32768:8:1$E4skp9sL1ymhm3nZ$55e98781ddb2577968678f360038fbaef1a49f92c96abdd8ab99cfce373607686a5b85484d736d4a560ecc7fcc8baa59b479d178f450543bb7f68cecda57cacf",
@@ -86,7 +88,7 @@
       "must_change_password": false,
       "pw_changed": "2026-10-02T13:31:46",
       "created_at": "2026-10-02T13:31:46",
-      "updated_at": "2026-10-02T13:38:58"
+      "updated_at": "2026-10-08T16:21:01"
     },
     "mandd": {
       "username": "mandd",
@@ -100,7 +102,8 @@
           "daily",
           "matrix",
           "inactive",
-          "summary"
+          "summary",
+          "punchin"
         ]
       },
       "password_hash": "scrypt:32768:8:1$fK8QRQArYBSqXVe8$d153c1badf60face0a764395c7ca5a75f006ab4985c2e1c15c485714284a976796bffd934485e7603b95bb8e30f161d5cbfa308def2e0f8a28f1459b2120738c",
@@ -108,7 +111,7 @@
       "must_change_password": false,
       "pw_changed": "2026-10-02T13:33:38",
       "created_at": "2026-10-02T13:33:38",
-      "updated_at": "2026-10-02T13:38:32"
+      "updated_at": "2026-10-08T16:21:29"
     },
     "merchx": {
       "username": "merchx",
@@ -122,7 +125,8 @@
           "daily",
           "matrix",
           "inactive",
-          "summary"
+          "summary",
+          "punchin"
         ]
       },
       "password_hash": "scrypt:32768:8:1$NRnG1IE5kwcGmYH3$2df32f08011c69c02b885e7902d55a2764b2c8d1f089b1d4006c2373877fc4e84dca7c430305d639662cc2f2a28daa23ad07e949f114226f6339439660272b5b",
@@ -130,7 +134,7 @@
       "must_change_password": false,
       "pw_changed": "2026-10-02T13:35:10",
       "created_at": "2026-10-02T13:35:10",
-      "updated_at": "2026-10-02T13:38:38"
+      "updated_at": "2026-10-08T16:21:33"
     },
     "happyusers": {
       "username": "happyusers",
@@ -144,7 +148,8 @@
           "daily",
           "matrix",
           "inactive",
-          "summary"
+          "summary",
+          "punchin"
         ]
       },
       "password_hash": "scrypt:32768:8:1$SjnIEiDEfAjT1413$083d43f399cb1331a01a33329775f504337f8bfc2ccb367528941c6a5d08c97a98c3dcae00abdca260e8f165048a9f497da0ec1e28843d913ad9d5dfb1e215d5",
@@ -152,7 +157,7 @@
       "must_change_password": false,
       "pw_changed": "2026-10-02T13:36:33",
       "created_at": "2026-10-02T13:36:33",
-      "updated_at": "2026-10-02T13:38:49"
+      "updated_at": "2026-10-08T16:21:15"
     },
     "grandis": {
       "username": "grandis",
@@ -166,7 +171,8 @@
           "daily",
           "matrix",
           "inactive",
-          "summary"
+          "summary",
+          "punchin"
         ]
       },
       "password_hash": "scrypt:32768:8:1$ObaZnxVqqARt3pYL$25c641d1d42b888f4b222ca6c88b303aedf0741ba29e76a66559f09383b8247e0df5a2d6fa002e7090373657b48886ff64e42fa9bfb026adccf3bba4d0538b3f",
@@ -174,7 +180,7 @@
       "must_change_password": false,
       "pw_changed": "2026-10-02T13:37:58",
       "created_at": "2026-10-02T13:37:58",
-      "updated_at": "2026-10-02T13:38:53"
+      "updated_at": "2026-10-09T09:42:59"
     }
   }
 }

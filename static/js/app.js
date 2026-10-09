@@ -53,7 +53,7 @@ window.addEventListener('load', async () => {
     businessSelect.disabled = true;
   }
   document.querySelectorAll('.tab[data-tab]').forEach(button =>
-    button.classList.toggle('hidden', !permissions.tabs.includes(['presence', 'monthly', 'punchout'].includes(button.dataset.tab) ? 'punchin' : button.dataset.tab))
+    button.classList.toggle('hidden', !permissions.tabs.includes(['presence', 'monthly', 'punchout', 'dashboard'].includes(button.dataset.tab) ? 'punchin' : button.dataset.tab))
   );
   // hide the whole Reports group when none of its reports is allowed
   $('reportsGroup')?.classList.toggle('hidden', !document.querySelector('#reportsOptions .tab[data-tab]:not(.hidden)'));
@@ -69,7 +69,10 @@ window.addEventListener('load', async () => {
 
   $('employeeSearch').addEventListener('input', filterVisibleRows);
   updateLocationTypeOptions();
-  const firstTab = ['daily', 'matrix', 'inactive', 'summary'].find(tab => permissions.tabs.includes(tab)) || 'daily';
+  // The Dashboard is the landing page for everyone who may see the punch reports (same permission).
+  const firstTab = permissions.tabs.includes('punchin')
+    ? 'dashboard'
+    : ['daily', 'matrix', 'inactive', 'summary'].find(tab => permissions.tabs.includes(tab)) || 'daily';
   showTab(firstTab);
   try {
     await loadBranches();
@@ -516,18 +519,21 @@ function appendSyncLog(message) {
   logElement.scrollTop = logElement.scrollHeight;
 }
 
+const SYNC_BUTTON = { archive: 'syncArchive', fetch: 'syncFetchData', settings: 'syncFetchDays' };
+
 function showDeveloperSyncPanel(action) {
-  ['daily', 'matrix', 'inactive', 'summary', 'punchin', 'punchout', 'presence', 'monthly'].forEach(id => $(id)?.classList.add('hidden'));
+  ['dashboard', 'daily', 'matrix', 'inactive', 'summary', 'punchin', 'punchout', 'presence', 'monthly'].forEach(id => $(id)?.classList.add('hidden'));
   $('syncPanel').classList.remove('hidden');
   $('employeeSearchRow').classList.add('hidden');
   document.querySelectorAll('.tab[data-tab]').forEach(button => button.classList.remove('active'));
   document.querySelectorAll('.sync-action').forEach(button =>
-    button.classList.toggle('active', button.id === (action === 'archive' ? 'syncArchive' : 'syncFetchData'))
+    button.classList.toggle('active', button.id === SYNC_BUTTON[action])
   );
   ['exportPdf', 'exportAll', 'exportMatrixPdf', 'exportInactivePdf', 'exportSummaryPdf', 'exportMonthlyPdf']
     .forEach(id => $(id)?.classList.add('hidden'));
   $('syncTitle').textContent = action === 'archive' ? 'Archive Attendance' : 'Fetch Attendance Data';
   $('syncLog').textContent = '';
+  $('fetchDaysPanel')?.classList.add('hidden');
   $('syncStatus').className = 'sync-status';
   $('syncStatus').textContent = action === 'archive' ? "Archiving yesterday's attendance..." : 'Starting the attendance fetch...';
 }
@@ -595,6 +601,70 @@ async function runDeveloperSyncAction(action) {
 
 window.runDeveloperSyncAction = runDeveloperSyncAction;
 
+// ---------- Developer: how many days to fetch / keep ----------
+function showFetchDays(settings) {
+  const input = $('fetchDaysInput');
+  input.min = settings.min;
+  input.max = settings.max;
+  input.value = settings.fetch_days;
+  input.dataset.current = settings.fetch_days;
+  $('syncStatus').textContent = `Currently the last ${settings.fetch_days} days (${dmy(settings.start)} to ${dmy(settings.end)}).`;
+  $('fetchDaysHint').textContent = `Allowed: ${settings.min} to ${settings.max} days. The daily fetch and Archive keep only this many days; `
+    + `older rows are deleted. Default from .env: ${settings.default_days}.`;
+}
+
+async function openFetchDaysSettings() {
+  showDeveloperSyncPanel('settings');
+  $('syncTitle').textContent = 'Fetch Days';
+  $('syncStatus').textContent = 'Loading...';
+  $('fetchDaysPanel').classList.remove('hidden');
+  try {
+    showFetchDays(await api('/api/developer/settings', null, { cache: false }));
+  } catch (error) {
+    $('syncStatus').textContent = error.message || String(error);
+    $('syncStatus').classList.add('error');
+  }
+}
+
+async function saveFetchDays(thenFetch) {
+  const input = $('fetchDaysInput');
+  const days = Number(input.value);
+  const min = Number(input.min), max = Number(input.max), current = Number(input.dataset.current);
+  const status = $('syncStatus');
+  status.classList.remove('success', 'error');
+  if (!Number.isInteger(days) || days < min || days > max) {
+    status.textContent = `Enter a whole number of days between ${min} and ${max}.`;
+    status.classList.add('error');
+    return;
+  }
+  if (days < current && !confirm(
+    `Reducing from ${current} to ${days} days will DELETE attendance rows older than ${days} days `
+    + 'at the next fetch or Archive. Continue?')) return;
+
+  const buttons = [$('fetchDaysSave'), $('fetchDaysSaveFetch')];
+  buttons.forEach(button => { button.disabled = true; });
+  try {
+    const response = await fetch(API_URL + '/api/developer/settings', {
+      method: 'POST', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fetch_days: days })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+    showFetchDays(data);
+    status.textContent = data.message;
+    status.classList.add('success');
+    if (thenFetch) await runDeveloperSyncAction('fetch');
+  } catch (error) {
+    status.textContent = error.message || String(error);
+    status.classList.add('error');
+  } finally {
+    buttons.forEach(button => { button.disabled = false; });
+  }
+}
+
+window.openFetchDaysSettings = openFetchDaysSettings;
+
 function setReportsOpen(open) {
   const toggle = $('reportsToggle'), options = $('reportsOptions');
   if (!toggle || !options) return;
@@ -608,8 +678,9 @@ $('reportsToggle')?.addEventListener('click', () =>
 function showTab(tab) {
   $('syncPanel').classList.add('hidden');
   document.querySelectorAll('.sync-action').forEach(button => button.classList.remove('active'));
-  ['daily', 'matrix', 'inactive', 'summary', 'punchin', 'punchout', 'presence', 'monthly'].forEach(id => $(id)?.classList.toggle('hidden', id !== tab));
-  $('employeeSearchRow').classList.toggle('hidden', ['summary', 'punchin', 'punchout', 'presence'].includes(tab));
+  ['dashboard', 'daily', 'matrix', 'inactive', 'summary', 'punchin', 'punchout', 'presence', 'monthly'].forEach(id => $(id)?.classList.toggle('hidden', id !== tab));
+  $('employeeSearchRow').classList.toggle('hidden', ['dashboard', 'summary', 'punchin', 'punchout', 'presence'].includes(tab));
+  document.querySelector('.status-search-row')?.classList.toggle('hidden', tab === 'dashboard');   // no status line on the dashboard
   document.querySelectorAll('.tab[data-tab]').forEach(button =>
     button.classList.toggle('active', button.dataset.tab === tab)
   );
@@ -649,6 +720,7 @@ bind('date', 'onchange', () => {
   renderDaily();
   renderMatrix();
   if (!$('summary').classList.contains('hidden')) loadSummary();
+  if (window.dashboardOpen?.()) loadDashboard();
   if (window.punchinOpen?.()) loadPunchin();
   if (window.punchoutOpen?.()) loadPunchout();
   if (window.monthlyOpen?.()) loadMonthly();
@@ -656,12 +728,19 @@ bind('date', 'onchange', () => {
 bind('from', 'onchange', renderMatrix);
 bind('to', 'onchange', renderMatrix);
 bind('exportSummaryPdf', 'onclick', exportSummaryPdf);
+bind('fetchDaysSave', 'onclick', () => saveFetchDays(false));
+bind('fetchDaysSaveFetch', 'onclick', () => saveFetchDays(true));
+bind('refresh', 'onclick', () => refreshActiveView());    // reload whatever view is open
 
 async function refreshActiveView() {
   if (!$('branch').value) return;
   clearApiCache();
-  const activeTab = ['daily', 'matrix', 'inactive', 'summary', 'punchin', 'punchout', 'presence', 'monthly']
+  const activeTab = ['dashboard', 'daily', 'matrix', 'inactive', 'summary', 'punchin', 'punchout', 'presence', 'monthly']
     .find(id => !$(`${id}`).classList.contains('hidden'));
+  if (activeTab === 'dashboard') {
+    await loadDashboard();
+    return;
+  }
   if (activeTab === 'punchin' || activeTab === 'presence') {
     await loadPunchin();
     return;
@@ -845,6 +924,10 @@ async function updateBranchOptions(loadData = true) {
     || options[0];
   branchSelect.value = selection.value;
   if (loadData) {
+    if (window.dashboardOpen?.()) {           // landing page: the dashboard loads its own data
+      await loadDashboard();
+      return;
+    }
     await loadBranch();
     if (!$('summary').classList.contains('hidden')) await loadSummary();
   }

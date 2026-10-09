@@ -60,11 +60,52 @@ def table_name(tab):
 
 
 # ---------------------------------------------------------------- connection
+# ---------------------------------------------------------------- saved settings
+# Small key/value table so a developer can change settings (e.g. the number of days to fetch) from the
+# web app. It lives in Neon, so it survives redeploys and is shared by the web app and data_fetch.py.
+def get_setting(key, default=None):
+    """Saved value of `key`, or `default` if it was never saved. Real errors (Neon down, ...) are raised
+    on purpose: the cleanup deletes rows, so it must never fall back to a wrong value silently."""
+    try:
+        with session() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM app_settings WHERE key = %s", (key,))
+                row = cur.fetchone()
+    except psycopg2.errors.UndefinedTable:          # nothing was ever saved: the table does not exist yet
+        return default
+    return row[0] if row else default
+
+
+def set_setting(key, value, updated_by=""):
+    with session() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS app_settings ("
+                "key text PRIMARY KEY, value text NOT NULL, "
+                "updated_at timestamptz NOT NULL DEFAULT now(), updated_by text)"
+            )
+            cur.execute(
+                "INSERT INTO app_settings (key, value, updated_by) VALUES (%s, %s, %s) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "
+                "updated_at = now(), updated_by = EXCLUDED.updated_by",
+                (key, str(value), updated_by or None),
+            )
+
+
+def fetch_days():
+    """Days in the fetch window: the value saved from the web app, else FETCH_DAYS from .env."""
+    try:
+        days = int(get_setting("fetch_days"))
+    except (TypeError, ValueError):
+        return Config.FETCH_DAYS
+    return min(max(days, Config.FETCH_DAYS_MIN), Config.FETCH_DAYS_MAX)
+
+
 def fetch_window():
-    """-> (start_date, end_date), both inclusive. 40 days ending today (in Config.TIMEZONE)."""
+    """-> (start_date, end_date), both inclusive. fetch_days() days ending today (in Config.TIMEZONE)."""
     today = datetime.now(ZoneInfo(Config.TIMEZONE)).date()
     end = today - timedelta(days=Config.FETCH_END_OFFSET_DAYS)
-    start = end - timedelta(days=Config.FETCH_DAYS - 1)
+    start = end - timedelta(days=fetch_days() - 1)
     return start, end
 
 

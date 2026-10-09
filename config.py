@@ -24,7 +24,11 @@ class Config:
     # ---- ESSL fetch window -------------------------------------------------------------
     # The window ends on (today - FETCH_END_OFFSET_DAYS) and covers FETCH_DAYS days in total,
     # e.g. today = 6 Oct, FETCH_DAYS = 40 -> 28 Aug .. 6 Oct.
+    # FETCH_DAYS is only the DEFAULT. A developer can change the number of days from the web app
+    # (Sync -> Fetch Days); that choice is stored in Neon and wins over this value.
     FETCH_DAYS = max(1, int(_get("FETCH_DAYS", "40")))
+    FETCH_DAYS_MIN = 7        # allowed range for the value set from the web app
+    FETCH_DAYS_MAX = 180
     FETCH_END_OFFSET_DAYS = max(0, int(_get("FETCH_END_OFFSET_DAYS", "0")))
     # 0 = ask ESSL for the whole window in ONE report. If ESSL ever rejects a long range,
     # set e.g. FETCH_CHUNK_DAYS=10 and the window is fetched in 10-day pieces instead.

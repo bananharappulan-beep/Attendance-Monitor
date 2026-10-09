@@ -1,0 +1,190 @@
+/* Dashboard (landing page) - "Emerald & Champagne" premium theme.
+   The palette is defined as variables on #dashboard only, so the other tabs keep the standard theme.
+   dashboard.js reads these same variables for the chart colours, so cards, legends and charts always match. */
+
+#dashboard {
+  /* re-tint the shared variables inside the dashboard (legends, labels and chart code use them) */
+  --navy-soft: #14504a;            /* deep emerald  */
+  --gold: #c9a24b;                 /* champagne gold */
+  --red: #a42e38;                  /* burgundy      */
+  --faint: #a39b86;                /* warm taupe    */
+  --late: #a8650f;                 /* bronze        */
+  --green-fg: #1b7653;             /* jade          */
+  --red-fg: #962a33;
+  --amber-fg: #8f5f0c;
+  /* gradient ends (top -> bottom) used by the bars and the donut */
+  --d-emerald-hi: #2f8274;  --d-emerald-lo: #0d3732;
+  --d-gold-hi: #efd590;     --d-gold-lo: #b7872f;
+  --d-ruby-hi: #c75a60;     --d-ruby-lo: #8a1f2d;
+  --d-taupe-hi: #c1b9a4;    --d-taupe-lo: #8e876e;
+  --d-jade-hi: #38a478;     --d-jade-lo: #14573f;
+  /* card surface */
+  --d-card-1: #ffffff;      --d-card-2: #f9f4e8;
+  --d-card-line: rgba(201, 162, 75, .34);
+  --d-card-shadow: rgba(78, 60, 22, .30);
+  --d-ink: #10302d;
+}
+
+[data-theme="dark"] #dashboard {
+  --navy-soft: #3f8d7f;
+  --gold: #e2c070;
+  --red: #dc6a71;
+  --faint: #929d95;
+  --late: #e5a64e;
+  --green-fg: #82d6a5;
+  --red-fg: #f0a09a;
+  --amber-fg: #f0cb72;
+  --d-emerald-hi: #55a896;  --d-emerald-lo: #1d5a50;
+  --d-gold-hi: #f5df9b;     --d-gold-lo: #c39a40;
+  --d-ruby-hi: #e87f85;     --d-ruby-lo: #a63d45;
+  --d-taupe-hi: #a8b2aa;    --d-taupe-lo: #737e77;
+  --d-jade-hi: #62d3a0;     --d-jade-lo: #1f7757;
+  --d-card-1: #18332f;      --d-card-2: #0f1f1d;
+  --d-card-line: rgba(226, 192, 112, .32);
+  --d-card-shadow: rgba(0, 0, 0, .6);
+  --d-ink: #f0e3bd;
+}
+
+#dashboard .hint { margin-bottom: .6rem; }
+
+/* ---------- premium card surface (KPI tiles + chart cards) ---------- */
+#dashboard .card {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(160deg, var(--d-card-1) 0%, var(--d-card-2) 100%);
+  border: 1px solid var(--d-card-line);
+  border-top-width: 1px;
+  border-radius: 1.2rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 14px 30px -14px var(--d-card-shadow), 0 2px 6px -2px var(--d-card-shadow);
+}
+[data-theme="dark"] #dashboard .card { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 14px 30px -14px var(--d-card-shadow), 0 2px 6px -2px var(--d-card-shadow); }
+/* thin gradient accent along the top edge */
+#dashboard .card::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; pointer-events: none;
+  background: linear-gradient(90deg, transparent 0%, var(--tone-lo, var(--d-gold-lo)) 12%, var(--tone-hi, var(--d-gold-hi)) 50%, var(--tone-lo, var(--d-gold-lo)) 88%, transparent 100%);
+}
+
+/* ---------- KPI row ---------- */
+.dash-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: .8rem; margin-bottom: .8rem; }
+.dash-kpi { padding: 1rem .6rem .85rem; }
+/* soft tinted glow in the top-right corner of each tile */
+.dash-kpi::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(110% 95% at 100% 0%, var(--tone-wash, transparent) 0%, transparent 62%);
+}
+.dash-kpi > * { position: relative; z-index: 1; }
+.dash-kpi .label { font-size: .68rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.dash-kpi .value { margin: .2rem 0 .1rem; line-height: 1.2; font-weight: 700; letter-spacing: -.01em; }
+.dash-kpi .value.small { font-size: 1.12rem; padding: .4rem 0; letter-spacing: 0; }
+.dash-kpi .sub { font-size: .72rem; color: var(--muted); min-height: 1.1em; }
+
+.dash-kpi.green { --tone-hi: var(--d-jade-hi); --tone-lo: var(--d-jade-lo); --tone-wash: rgba(40, 150, 105, .13); }
+.dash-kpi.green .value { color: var(--green-fg); }
+.dash-kpi.red { --tone-hi: var(--d-ruby-hi); --tone-lo: var(--d-ruby-lo); --tone-wash: rgba(170, 45, 60, .12); }
+.dash-kpi.red .value { color: var(--red-fg); }
+.dash-kpi.amber { --tone-hi: var(--d-gold-hi); --tone-lo: var(--d-gold-lo); --tone-wash: rgba(201, 162, 75, .17); }
+.dash-kpi.amber .value { color: var(--amber-fg); }
+.dash-kpi.navy { --tone-hi: var(--d-emerald-hi); --tone-lo: var(--d-emerald-lo); --tone-wash: rgba(30, 110, 98, .12); }
+.dash-kpi.navy .value { color: var(--d-ink); }
+[data-theme="dark"] .dash-kpi.green { --tone-wash: rgba(98, 211, 160, .12); }
+[data-theme="dark"] .dash-kpi.red { --tone-wash: rgba(232, 127, 133, .12); }
+[data-theme="dark"] .dash-kpi.amber { --tone-wash: rgba(226, 192, 112, .14); }
+[data-theme="dark"] .dash-kpi.navy { --tone-wash: rgba(85, 168, 150, .13); }
+
+/* ---------- main grid: two charts on the left, donut + insights on the right ---------- */
+.dash-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: .8rem; align-items: stretch; flex: 1 1 0; min-height: 0; }
+/* the dashboard fills the window under the header: KPI row on top, the grid takes the rest */
+#dashboard { display: flex; flex-direction: column; height: var(--dash-h, calc(100vh - 11rem)); min-height: 520px; overflow: visible; }
+#dashboard .dash-kpis { flex: 0 0 auto; }
+.dash-main, .dash-side { display: flex; flex-direction: column; gap: .8rem; min-width: 0; min-height: 0; }
+.dash-card { margin: 0; padding: 1.05rem 1.1rem .75rem; text-align: left; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.dash-main .dash-card { flex: 1 1 0; }
+.dash-side .dash-card:not(.dash-insights-card) { flex: 1.15 1 0; min-height: 235px; }   /* donut + legend always fully visible */
+.dash-card .punchin-chart-head { margin-bottom: .4rem; }
+.dash-card .punchin-chart-head h2 {
+  display: flex; align-items: center; gap: .55rem; margin: 0; font-size: 1rem; letter-spacing: .01em; color: var(--d-ink);
+}
+.dash-card .punchin-chart-head h2::before {
+  content: ''; flex: 0 0 auto; width: .26rem; height: 1.05rem; border-radius: 99px;
+  background: linear-gradient(180deg, var(--d-gold-hi), var(--d-gold-lo));
+}
+.dash-chart, 
+.dash-chart .chart-skeleton { height: 100%; min-height: 0; }
+.dash-pie .pie-skeleton { height: 100%; min-height: 0; }
+.dash-pie .pie-skeleton .sk { width: 150px; height: 150px; }
+/* sidebar runs the full height of the dashboard */
+.app-layout:has(#dashboard:not(.hidden)) { align-items: stretch; }
+.app-layout:has(#dashboard:not(.hidden)) .sidebar { min-height: 0; }
+.dash-pie-legend { justify-content: center; gap: .4rem 1.4rem; font-size: .8rem; }
+#dashboard .punchin-legend i { border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18); }
+
+/* ---------- key insights ---------- */
+.dash-insights-card { flex: 1 1 0; min-height: 150px; }
+.dash-insights { list-style: none; margin: .3rem 0 0; padding: 0 .3rem 0 0; display: flex; flex-direction: column; gap: .35rem;
+  flex: 1 1 0; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--d-gold-lo) transparent; }
+.dash-insights li { flex: 0 0 auto; }
+.dash-insights::-webkit-scrollbar { width: 6px; }
+.dash-insights::-webkit-scrollbar-thumb { background: var(--d-gold-lo); border-radius: 99px; }
+.dash-insights::-webkit-scrollbar-track { background: transparent; }
+.dash-insights li {
+  display: flex; align-items: center; gap: .7rem; padding: clamp(.25rem, .7vh, .5rem) .7rem; border-radius: .75rem;
+  font-size: clamp(.76rem, 1.45vh, .86rem); line-height: 1.3;
+  background: linear-gradient(90deg, var(--ins-wash, rgba(150, 140, 110, .08)), transparent 78%);
+}
+.dash-insights li::before { content: ''; flex: 0 0 auto; width: .28rem; align-self: stretch; min-height: 1.4rem; border-radius: 99px; background: var(--faint); }
+.dash-insights li.green { --ins-wash: rgba(30, 110, 98, .10); }
+.dash-insights li.green::before { background: linear-gradient(180deg, var(--d-emerald-hi), var(--d-emerald-lo)); }
+.dash-insights li.gold { --ins-wash: rgba(201, 162, 75, .14); }
+.dash-insights li.gold::before { background: linear-gradient(180deg, var(--d-gold-hi), var(--d-gold-lo)); }
+.dash-insights li.red { --ins-wash: rgba(170, 45, 60, .09); }
+.dash-insights li.red::before { background: linear-gradient(180deg, var(--d-ruby-hi), var(--d-ruby-lo)); }
+.dash-insights li.grey::before { background: linear-gradient(180deg, var(--d-taupe-hi), var(--d-taupe-lo)); }
+[data-theme="dark"] .dash-insights li.green { --ins-wash: rgba(85, 168, 150, .14); }
+[data-theme="dark"] .dash-insights li.gold { --ins-wash: rgba(226, 192, 112, .12); }
+[data-theme="dark"] .dash-insights li.red { --ins-wash: rgba(232, 127, 133, .12); }
+[data-theme="dark"] .dash-insights li.grey { --ins-wash: rgba(168, 178, 170, .09); }
+
+@media (max-width: 1280px) { .dash-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1000px) {
+  .dash-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; flex: none; }
+  #dashboard { height: auto; min-height: 0; }
+  .dash-chart { flex: none; height: 270px; }
+  .dash-pie { flex: none; height: 240px; }
+  .dash-main .dash-card, .dash-side .dash-card { flex: none; }
+  .dash-insights { flex: none; max-height: 340px; }
+}
+@media (max-width: 600px) { .dash-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---------- short windows (laptops, display scaling): tighten spacing so everything still fits ---------- */
+@media (max-height: 860px) and (min-width: 1001px) {
+  .dash-kpis, .dash-grid, .dash-main, .dash-side { gap: .6rem; }
+  .dash-kpis { margin-bottom: .6rem; }
+  .dash-kpi { padding: .6rem .5rem .55rem; }
+  #dashboard .dash-kpi .value { font-size: 1.35rem; margin: .1rem 0; }
+  #dashboard .dash-kpi .value.small { font-size: 1rem; padding: .2rem 0; }
+  .dash-kpi .label { font-size: .62rem; }
+  .dash-kpi .sub { font-size: .66rem; }
+  .dash-card { padding: .65rem .85rem .5rem; }
+  .dash-card .punchin-chart-head { margin-bottom: .2rem; }
+  .dash-card .punchin-chart-head h2 { font-size: .9rem; }
+  #dashboard .punchin-legend { font-size: .68rem; margin: 0; }
+  .dash-pie-legend { font-size: .72rem; }
+  .dash-insights li { font-size: .78rem; padding: .25rem .6rem; }
+}
+@media (max-height: 700px) and (min-width: 1001px) {
+  .dash-kpi .sub { display: none; }
+  .dash-insights li { font-size: .74rem; }
+}
+
+/* ---------- sidebar scrolling ---------- */
+.sidebar { overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--gold, #c9a24b) transparent; }
+.sidebar::-webkit-scrollbar { width: 6px; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--gold, #c9a24b); border-radius: 99px; }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
+/* other tabs: sidebar stays in view and scrolls on its own when it is taller than the window */
+.app-layout .sidebar { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); }
+/* dashboard: sidebar is exactly as tall as the dashboard and scrolls inside it */
+.app-layout:has(#dashboard:not(.hidden)) .sidebar { position: static; height: 0; min-height: 100%; max-height: none; }
+@media (max-width: 760px) {
+  .app-layout .sidebar, .app-layout:has(#dashboard:not(.hidden)) .sidebar { position: static; height: auto; min-height: 0; max-height: none; overflow-y: visible; }
+}

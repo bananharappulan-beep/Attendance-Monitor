@@ -6,7 +6,7 @@
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const TABS = [['daily', 'Daily Report'], ['matrix', 'Status Matrix'],
                 ['inactive', 'Inactive Employees'], ['summary', 'Overall Summary'],
-                ['punchin', 'Punch-in Report']];
+                ['punchin', 'Dashboard & Punch Reports']];
   const BUSINESSES = ['MAGNUS', 'ALIMS', 'M&D', 'MERCHX', 'HU', 'GRANDIS'];
   let me = null;
 
@@ -84,6 +84,8 @@
     const syncFetchData = $('syncFetchData');
     if (syncArchive) syncArchive.onclick = () => window.runDeveloperSyncAction?.('archive');
     if (syncFetchData) syncFetchData.onclick = () => window.runDeveloperSyncAction?.('fetch');
+    const syncFetchDays = $('syncFetchDays');
+    if (syncFetchDays) syncFetchDays.onclick = () => window.openFetchDaysSettings?.();
     $('ubPw').onclick = () => {
       userMenu.classList.add('hidden');
       userMenuToggle?.setAttribute('aria-expanded', 'false');

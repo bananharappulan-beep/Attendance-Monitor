@@ -25,6 +25,13 @@ Archive = cleanup only). It can also be run on its own, e.g. from cron: `python 
    (keep a single worker so the daily scheduler and in-memory cache run once).
 
 ## Fetch window
+**Developer setting:** the number of days can be changed in the web app without touching `.env` - sidebar
+**SYNC -> Fetch Days** (developer login only; allowed 7 to 180). It is stored in Neon (small `app_settings` table,
+created automatically on the first save), so it survives redeploys and is used by the daily automatic fetch, the
+manual Fetch Data and Archive. `FETCH_DAYS` in `.env` is now only the default until someone saves a value.
+Reducing the days deletes the older rows at the next fetch or Archive (the page asks for confirmation first);
+increasing it needs a Fetch Data run to load the extra days (**Save & Fetch Data** does both).
+
 `FETCH_DAYS=40` and `FETCH_END_OFFSET_DAYS=0` give: from = today - 39 days, to = today.
 Example (6 Oct 2026): 28 Aug 2026 .. 6 Oct 2026. Set `FETCH_END_OFFSET_DAYS=1` to end yesterday instead.
 
@@ -40,3 +47,9 @@ from the table and the Company column (e.g. `manjeri` + company ALIMS -> `ALIMS 
 ## API
 Same routes as before. `GET /api/sync` and `POST /api/refresh` re-read Neon; `POST /api/developer/archive`
 runs the cleanup; `POST /api/developer/fetch-data` streams the ESSL fetch log.
+## Dashboard (landing page)
+The app now opens on **Dashboard**: summary cards (present, absent, late, left early, peak punch-in / punch-out),
+the punch-in and punch-out charts, a present/absent donut, and key insights. It follows the slicers (Business Name, Location Type, Branch, Date) and uses
+the same rules the former Punch-in / Punch-out reports used, so the numbers match. Files: `static/js/dashboard.js`,
+`static/css/dashboard.css`, and the `#dashboard` section in `templates/index.html`. It is shown to every user
+who has the "Dashboard & Punch Reports" (`punchin`) permission. The top **Refresh** button reloads the open view.

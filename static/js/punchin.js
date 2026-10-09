@@ -457,7 +457,7 @@
     const originalShowTab = window.showTab;
     window.showTab = function (tab) {
       if (tab === 'punchin' || tab === 'presence') { followTop = true; addAllOption(); }
-      else if (tab === 'punchout') addAllOption();
+      else if (tab === 'punchout' || tab === 'dashboard') addAllOption();
       else if (tab === 'monthly') addAllOption();
       else removeAllOption();
       const result = originalShowTab.apply(this, arguments);

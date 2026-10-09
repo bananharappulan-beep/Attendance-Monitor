@@ -4,9 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Attendance Monitor</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='13') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='14') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css', v='4') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/punchin.css', v='7') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css', v='9') }}">
 </head>
 <body>
 <div class="container">
@@ -77,6 +78,7 @@
         </select>
       </label>
       <nav class="tabs" aria-label="Attendance views">
+        <button data-tab="dashboard" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="8" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="5" rx="1.5"/><rect x="13.5" y="11.5" width="7" height="9" rx="1.5"/><rect x="3.5" y="14.5" width="7" height="6" rx="1.5"/></svg>Dashboard</button>
         <button data-tab="daily" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg>Daily Report</button>
         <button data-tab="matrix" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM4 10h16M10 4v16"/></svg>Status Matrix</button>
         <button data-tab="inactive" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5 20a7 7 0 0 1 14 0M19 5l2 2-4 4"/></svg>Inactive Employees</button>
@@ -88,9 +90,6 @@
             <svg class="ui-icon sync-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
           </button>
           <div id="reportsOptions" class="reports-options">
-            <button data-tab="punchin" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>Punch-in Report</button>
-            <button data-tab="punchout" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l-3 2"/></svg>Punch-out Report</button>
-            <button data-tab="presence" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/></svg>Present &amp; Absent</button>
             <button data-tab="monthly" class="tab"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg>Monthly Status</button>
           </div>
         </div>
@@ -106,11 +105,53 @@
         <div id="syncSectionOptions" class="sync-section-options" hidden>
           <button id="syncArchive" class="sync-action" type="button">Archive</button>
           <button id="syncFetchData" class="sync-action" type="button">Fetch Data</button>
+          <button id="syncFetchDays" class="sync-action" type="button">Fetch Days</button>
         </div>
       </div>
     </aside>
 
     <main class="workspace">
+  <section id="dashboard" class="hidden">
+    <div id="dashKpis" class="dash-kpis"></div>
+    <div class="dash-grid">
+      <div class="dash-main">
+        <div class="card dash-card">
+          <div class="punchin-chart-head"><h2 id="dashInTitle">Employees by punch-in time</h2></div>
+          <div id="dashPunchinChart" class="dash-chart"></div>
+          <div class="punchin-legend" aria-hidden="true">
+            <span><i style="background:var(--navy-soft)"></i>Punch-in slot</span>
+            <span><i style="background:var(--gold)"></i>Busiest slot</span>
+            <span><i style="background:var(--red)"></i>2:00 PM or later</span>
+            <span><i style="background:var(--faint)"></i>No punch-in</span>
+            <span>Dashed line = late cut-off</span>
+          </div>
+        </div>
+        <div class="card dash-card">
+          <div class="punchin-chart-head"><h2 id="dashOutTitle">Employees by punch-out time</h2></div>
+          <div id="dashPunchoutChart" class="dash-chart"></div>
+          <div class="punchin-legend" aria-hidden="true">
+            <span><i style="background:var(--navy-soft)"></i>Punch-out slot</span>
+            <span><i style="background:var(--gold)"></i>Busiest slot</span>
+            <span><i style="background:var(--red)"></i>Before 4:00 PM</span>
+            <span><i style="background:var(--faint)"></i>No punch-out</span>
+            <span>Dashed line = early-leaving cut-off</span>
+          </div>
+        </div>
+      </div>
+      <div class="dash-side">
+        <div class="card dash-card">
+          <div class="punchin-chart-head"><h2 id="dashPieTitle">Present vs Absent</h2></div>
+          <div id="dashPresenceChart" class="dash-pie"></div>
+          <div id="dashPieLegend" class="punchin-legend dash-pie-legend"></div>
+        </div>
+        <div class="card dash-card dash-insights-card">
+          <div class="punchin-chart-head"><h2>Key Insights</h2></div>
+          <ul id="dashInsights" class="dash-insights"></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section id="daily">
     <div id="cards" class="cards"></div>
     <div class="table-wrap">
@@ -216,6 +257,16 @@
     <h2 id="syncTitle"></h2>
     <p id="syncStatus" class="sync-status">Choose an action from the Sync menu.</p>
     <pre id="syncLog" class="sync-log"></pre>
+    <div id="fetchDaysPanel" class="fetch-days hidden">
+      <label>Days of attendance to keep and fetch
+        <input id="fetchDaysInput" type="number" inputmode="numeric" step="1" required>
+      </label>
+      <p id="fetchDaysHint" class="hint"></p>
+      <div class="fetch-days-actions">
+        <button id="fetchDaysSave" class="btn" type="button">Save</button>
+        <button id="fetchDaysSaveFetch" class="btn btn-secondary" type="button">Save &amp; Fetch Data</button>
+      </div>
+    </div>
   </section>
     </main>
   </div>
@@ -224,10 +275,11 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highcharts/11.4.8/highcharts.js"></script>
-<script src="{{ url_for('static', filename='js/auth-ui.js', v='7') }}"></script>
-<script src="{{ url_for('static', filename='js/app.js', v='26') }}"></script>
-<script src="{{ url_for('static', filename='js/punchin.js', v='12') }}"></script>
+<script src="{{ url_for('static', filename='js/auth-ui.js', v='8') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='28') }}"></script>
+<script src="{{ url_for('static', filename='js/punchin.js', v='13') }}"></script>
 <script src="{{ url_for('static', filename='js/punchout.js', v='2') }}"></script>
 <script src="{{ url_for('static', filename='js/monthly.js', v='2') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js', v='5') }}"></script>
 </body>
 </html>
