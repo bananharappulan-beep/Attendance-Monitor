@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 from playwright.sync_api import sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 import db
 from config import Config
@@ -260,12 +261,25 @@ def run(retain_progress=False):
         page = browser.new_page(accept_downloads=True, viewport={"width": 1600, "height": 900})
 
         try:
-            page.goto(URL, timeout=60000)
-            page.wait_for_selector("input[name='StaffloginDialog$txt_LoginName']", timeout=30000)
+            # ESSL pages are slow and can keep loading ads/trackers: wait only for the page itself,
+            # allow 2 minutes per try and retry before giving up.
+            for attempt in range(1, 4):
+                try:
+                    page.goto(URL, timeout=120000, wait_until="domcontentloaded")
+                    break
+                except PlaywrightTimeoutError:
+                    if attempt == 3:
+                        raise
+                    print(f"ESSL page is slow (attempt {attempt}/3), retrying...", flush=True)
+                    page.wait_for_timeout(5000)
+            page.wait_for_selector("input[name='StaffloginDialog$txt_LoginName']", timeout=90000)
             page.fill("input[name='StaffloginDialog$txt_LoginName']", USER)
             page.fill("input[name='StaffloginDialog$Txt_Password']", PASS)
             page.click("[name='StaffloginDialog$Btn_Ok']")
-            page.wait_for_load_state("networkidle")
+            try:
+                page.wait_for_load_state("networkidle", timeout=45000)
+            except PlaywrightTimeoutError:
+                pass                      # ESSL never fully idles; the login check below decides
             page.wait_for_timeout(2000)
             login_form = page.locator(
                 "input[name='StaffloginDialog$txt_LoginName']"

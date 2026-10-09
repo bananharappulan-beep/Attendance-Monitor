@@ -535,6 +535,7 @@ function showDeveloperSyncPanel(action) {
   $('syncLog').textContent = '';
   $('fetchDaysPanel')?.classList.add('hidden');
   $('syncStatus').className = 'sync-status';
+  $('syncStatus').style.color = '';
   $('syncStatus').textContent = action === 'archive' ? "Archiving yesterday's attendance..." : 'Starting the attendance fetch...';
 }
 
@@ -591,9 +592,21 @@ async function runDeveloperSyncAction(action) {
     $('syncStatus').textContent = completion.message;
     $('syncStatus').classList.add(completion.ok ? 'success' : 'error');
   } catch (error) {
-    $('syncStatus').textContent = error.message || String(error);
-    $('syncStatus').classList.add('error');
-    appendSyncLog(`ERROR: ${error.message || error}`);
+    const raw = error.message || String(error);
+    const busy = /already running/i.test(raw);
+    // the server allows one sync action at a time: explain what to do instead of just showing the raw error
+    $('syncStatus').textContent = busy
+      ? 'Another sync (fetch or archive) is still running on the server. Wait for it to finish, then try again.'
+      : raw;
+    $('syncStatus').classList.add(busy ? 'warn' : 'error');
+    if (busy) {
+      $('syncStatus').style.color = '#8f5f0c';
+      appendSyncLog('The server is already busy with a sync. If nothing has been running for several minutes, '
+        + 'the lock may be stuck: restart the server and click again.');
+    } else {
+      $('syncStatus').style.color = '';
+      appendSyncLog(`ERROR: ${raw}`);
+    }
   } finally {
     buttons.forEach(button => { button.disabled = false; });
   }
