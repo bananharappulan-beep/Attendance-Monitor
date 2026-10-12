@@ -44,6 +44,9 @@
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const pct = (n, d) => d ? `${Math.round((n / d) * 100)}%` : '0%';
   const plural = (n, word = 'employee') => `${n} ${word}${n === 1 ? '' : 's'}`;
+  // Chart text is set in px, so scale it with the page (root font size is 80% on desktop, see style.css).
+  const uiScale = () => (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16) / 16;
+  const fpx = n => (Math.round(n * uiScale() * 10) / 10) + 'px';
   const ALL_VALUE = '__ALL__';       // the "ALL" entry in the top Branch dropdown (added by punchin.js)
 
   const blank = (key, label) => ({
@@ -251,21 +254,21 @@
       title: { text: null }, credits: { enabled: false }, legend: { enabled: false },
       xAxis: {
         categories: buckets.map(b => b.axis), lineColor: col.muted, tickLength: 0,
-        labels: { rotation: -35, style: { color: col.muted, fontSize: boxHeight(box, 110) < 230 ? '10px' : '11px', textOverflow: 'none', whiteSpace: 'nowrap' } },
+        labels: { rotation: -35, style: { color: col.muted, fontSize: fpx(boxHeight(box, 110) < 230 ? 10 : 11), textOverflow: 'none', whiteSpace: 'nowrap' } },
         crosshair: { color: 'rgba(201, 162, 75, .12)' },
         plotLines: [{ value: cutX, color: col.late, width: 1.5, dashStyle: 'Dash', zIndex: 5,
                       label: { text: cutLabel, rotation: 0, x: 5, y: 12,
-                               style: { color: col.late, fontWeight: '700', fontSize: '11px' } } }]
+                               style: { color: col.late, fontWeight: '700', fontSize: fpx(11) } } }]
       },
       yAxis: { title: { text: null }, min: 0, maxPadding: 0.16, allowDecimals: false, gridLineColor: col.border,
-               labels: { style: { color: col.muted, fontSize: '11px' } } },
+               labels: { style: { color: col.muted, fontSize: fpx(11) } } },
       plotOptions: {
         series: { animation: { duration: 250 }, states: { inactive: { opacity: 1 } } },
-        column: { borderWidth: 0, borderRadius: 3, maxPointWidth: 44, pointPadding: 0.12, groupPadding: 0 }
+        column: { borderWidth: 0, borderRadius: 3, maxPointWidth: Math.round(44 * uiScale()), pointPadding: 0.12, groupPadding: 0 }
       },
       tooltip: {
         shared: true, useHTML: true, outside: true, borderRadius: 8, borderColor: col.peak,
-        backgroundColor: col.surface, shadow: false, style: { color: col.text, fontSize: '12px' },
+        backgroundColor: col.surface, shadow: false, style: { color: col.text, fontSize: fpx(12) },
         formatter() {
           const i = this.points[0].point.index, n = counts[i];
           let html = `<div style="min-width:150px"><b>${text(buckets[i].label)}</b><br>${plural(n)} (${pct(n, total)} of ${total})`;
@@ -282,7 +285,7 @@
       series: [{
         name: 'Employees',
         data: buckets.map((bucket, i) => ({ y: counts[i], color: colorOf(bucket, i) })),
-        dataLabels: { enabled: true, style: { color: col.text, fontSize: '11px', fontWeight: '700', textOutline: 'none' },
+        dataLabels: { enabled: true, style: { color: col.text, fontSize: fpx(11), fontWeight: '700', textOutline: 'none' },
                       formatter() { return this.y ? this.y : null; } }
       }]
     });
@@ -309,7 +312,7 @@
       credits: { enabled: false }, legend: { enabled: false },
       tooltip: {
         useHTML: true, outside: true, borderRadius: 8, borderColor: col.peak, backgroundColor: col.surface,
-        shadow: false, style: { color: col.text, fontSize: '12px' },
+        shadow: false, style: { color: col.text, fontSize: fpx(12) },
         formatter() {
           const key = this.point.options.key, n = this.y;
           let html = `<div style="min-width:150px"><b>${names[key]}</b><br>${plural(n)} (${pct(n, s.total)} of ${s.total})`;

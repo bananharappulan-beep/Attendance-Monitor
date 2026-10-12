@@ -386,3 +386,6 @@ html::-webkit-scrollbar { display: none; }
 .fetch-days input[type="number"]:focus { box-shadow: 0 0 0 3px rgba(201, 162, 75, .35), 3px 4px 9px rgba(196, 186, 158, .42); }
 .fetch-days .hint { margin: 0; }
 .fetch-days-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
+/* ---- Compact scale: desktop renders at 80% (same look as browser zoom 80%) ----
+   Everything sized in rem/em shrinks with the root font size; phones/tablets (<=760px) stay at 100%. */
+@media (min-width: 761px) { html { font-size: 80%; } }
