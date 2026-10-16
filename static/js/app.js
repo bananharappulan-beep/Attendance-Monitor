@@ -740,6 +740,10 @@ bind('date', 'onchange', () => {
 });
 bind('from', 'onchange', renderMatrix);
 bind('to', 'onchange', renderMatrix);
+bind('exportPdf', 'onclick', exportBranchPdf);
+bind('exportAll', 'onclick', exportAllPdf);
+bind('exportMatrixPdf', 'onclick', exportMatrixPdf);
+bind('exportInactivePdf', 'onclick', exportInactivePdf);
 bind('exportSummaryPdf', 'onclick', exportSummaryPdf);
 bind('fetchDaysSave', 'onclick', () => saveFetchDays(false));
 bind('fetchDaysSaveFetch', 'onclick', () => saveFetchDays(true));
@@ -1095,13 +1099,13 @@ function loadScript(src) {
 }
 
 // jsPDF is normally loaded by index.html; if the page didn't include it, load it here.
-async function pdfReady() {
+async function pdfReady({ requireCanvas = false } = {}) {
   try {
     if (!(window.jspdf && window.jspdf.jsPDF))
       await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
     if (!(window.jspdf.jsPDF.API && window.jspdf.jsPDF.API.autoTable))
       await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
-    if (!window.html2canvas)
+    if (requireCanvas && !window.html2canvas)
       await loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');
     await document.fonts.load('400 12px Lora');
     await document.fonts.ready;
@@ -1113,12 +1117,21 @@ async function pdfReady() {
 }
 
 async function exportBranchPdf() {
-  const date = $('date').value;
-  if (!(await pdfReady())) return;
-  if (!date || !rows.length) return setMsg('No data to export for this branch/date.', true);
-  const branch = $('branch').selectedOptions[0]?.textContent || $('branch').value;
-  await makePdf(branch, rows, date);
-  setMsg(`Exported ${branch}.pdf`);
+  const button = $('exportPdf');
+  button.disabled = true;
+  try {
+    const date = $('date').value;
+    if (!(await pdfReady())) return;
+    if (!date || !rows.length) return setMsg('No data to export for this branch/date.', true);
+    const branch = $('branch').selectedOptions[0]?.textContent || $('branch').value;
+    await makePdf(branch, rows, date);
+    setMsg(`Exported ${branch}.pdf`);
+  } catch (e) {
+    setMsg('Export error: ' + (e.message || e), true);
+    console.error(e);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 // Source tab names that fall inside the current Business Name / Business Type slicers.
@@ -1139,12 +1152,12 @@ function slicerBranchSources(available) {
 }
 
 async function exportAllPdf() {
-  const date = $('date').value;
-  if (!(await pdfReady())) return;
-  if (!date) return setMsg('Select a date first.', true);
   const btn = $('exportAll');
   btn.disabled = true;
   try {
+    const date = $('date').value;
+    if (!(await pdfReady())) return;
+    if (!date) return setMsg('Select a date first.', true);
     const available = await api('/api/branches');
     const branches = slicerBranchSources(available);
     if (!branches.length) throw new Error('No branches found for the selected Business Name / Business Type.');
@@ -1155,7 +1168,7 @@ async function exportAllPdf() {
     }
     setMsg(`Downloaded ${branches.length} branch PDF(s) for ${dmy(date)}. If some are missing, allow multiple downloads in your browser.`);
   } catch (e) { setMsg('Export error: ' + (e.message || e), true); }
-  btn.disabled = false;
+  finally { btn.disabled = false; }
 }
 
 function applyStatusColorsForPdfCell(cell, theme = '') {
@@ -1194,7 +1207,7 @@ function applyStatusColorsForPdfCell(cell, theme = '') {
 }
 
 async function exportTablePdf(tableId, title, filename, options = {}) {
-  if (!(await pdfReady())) return;
+  if (!(await pdfReady({ requireCanvas: true }))) return;
   const table = $(tableId);
   if (!table || !table.querySelector('thead tr') || !table.querySelector('tbody tr') || table.querySelector('tbody .empty'))
     return setMsg('No data to export for this view.', true);
@@ -1348,44 +1361,122 @@ async function exportTablePdf(tableId, title, filename, options = {}) {
   }
 }
 
-function exportMatrixPdf() {
+async function exportMatrixPdf() {
   const branch = $('branch').selectedOptions[0]?.textContent || $('branch').value;
   const from = $('from').value, to = $('to').value;
   const range = from && to ? `${dmy(from)} - ${dmy(to)}` : '';
   const safeBranch = String(branch).replace(/[\\/:*?"<>|]/g, '_').trim();
-  return exportTablePdf('matrixTable', `${branch} - Status Matrix${range ? ` (${range})` : ''}`,
-    `${safeBranch}-status-matrix.pdf`, { landscape: true, theme: 'matrix' });
+  const title = `${branch} - Status Matrix${range ? ` (${range})` : ''}`;
+  const button = $('exportMatrixPdf');
+  button.disabled = true;
+  try {
+    if (!(await pdfReady())) return;
+    const table = $('matrixTable');
+    const head = [...table.querySelectorAll('thead tr')].map(row =>
+      [...row.cells].map(cell => cell.textContent.trim())
+    );
+    const body = [...table.querySelectorAll('tbody tr')]
+      .filter(row => !row.classList.contains('hidden') && !row.querySelector('.empty'))
+      .map(row => [...row.cells].map(cell => cell.textContent.trim()));
+    if (!head.length || !body.length) {
+      setMsg('No data to export for this view.', true);
+      return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
+    await registerLoraFont(pdf);
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    pdf.autoTable({
+      head,
+      body,
+      startY: 44,
+      margin: { top: 44, right: 16, bottom: 18, left: 16 },
+      showHead: 'everyPage',
+      horizontalPageBreak: true,
+      horizontalPageBreakRepeat: [0, 1],
+      rowPageBreak: 'avoid',
+      styles: {
+        font: 'Lora',
+        fontSize: 5.5,
+        cellPadding: 2,
+        overflow: 'linebreak',
+        lineColor: [223, 231, 239],
+        lineWidth: 0.3,
+        textColor: [30, 41, 59],
+        valign: 'middle'
+      },
+      headStyles: {
+        fillColor: [226, 232, 240],
+        textColor: [15, 23, 42],
+        font: 'Lora',
+        fontStyle: 'bold',
+        halign: 'center'
+      },
+      columnStyles: Object.fromEntries(head[0].map((_, index) => [
+        index,
+        index === 0 ? { cellWidth: 55 } :
+          index === 1 ? { cellWidth: 90, halign: 'left' } :
+            { cellWidth: 20, halign: 'center' }
+      ])),
+      didParseCell: cell => {
+        if (cell.section === 'body') applyStatusColorsForPdfCell(cell);
+      },
+      willDrawPage: () => {
+        pdf.setFont('Lora', 'bold');
+        pdf.setFontSize(11);
+        pdf.setTextColor(15, 23, 42);
+        pdf.text(title, pageWidth / 2, 26, { align: 'center', maxWidth: pageWidth - 32 });
+      }
+    });
+    pdf.save(`${safeBranch}-status-matrix.pdf`);
+    setMsg(`Exported ${safeBranch}-status-matrix.pdf`);
+  } catch (e) {
+    setMsg('PDF export failed: ' + (e.message || e), true);
+    console.error(e);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function exportInactivePdf() {
-  if (!(await pdfReady())) return;
-  const table = $('inactiveTable');
-  const body = [...table.querySelectorAll('tbody tr')]
-    .filter(row => !row.querySelector('.empty'))
-    .map(row => [...row.cells].map(cell => cell.textContent.trim()));
-  if (!body.length) return setMsg('No inactive employees to export for this view.', true);
+  const button = $('exportInactivePdf');
+  button.disabled = true;
+  try {
+    if (!(await pdfReady())) return;
+    const table = $('inactiveTable');
+    const body = [...table.querySelectorAll('tbody tr')]
+      .filter(row => !row.classList.contains('hidden') && !row.querySelector('.empty'))
+      .map(row => [...row.cells].map(cell => cell.textContent.trim()));
+    if (!body.length) return setMsg('No inactive employees to export for this view.', true);
 
-  const branch = $('branch').selectedOptions[0]?.textContent || $('branch').value;
-  const safeBranch = String(branch).replace(/[\\/:*?"<>|]/g, '_').trim();
-  const { jsPDF } = window.jspdf;
-  const pdf = new jsPDF({ unit: 'pt', format: 'a4' });
-  await registerLoraFont(pdf);
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  pdf.setFont('Lora', 'bold');
-  pdf.setFontSize(16);
-  pdf.setTextColor(0, 0, 0);
-  pdf.text(`Inactive Employees - ${branch}`, pageWidth / 2, 34, { align: 'center' });
-  pdf.autoTable({
-    startY: 52,
-    margin: { left: 32, right: 32 },
-    head: [['EMPLOYEE CODE', 'EMPLOYEE NAME']],
-    body,
-    showHead: 'everyPage',
-    styles: { font: 'Lora', fontSize: 10, cellPadding: 6, halign: 'center', textColor: [0, 0, 0] },
-    headStyles: { fillColor: [217, 217, 217], textColor: [0, 0, 0], font: 'Lora', fontStyle: 'bold', halign: 'center' }
-  });
-  pdf.save(`${safeBranch}-inactive-employees.pdf`);
-  setMsg(`Exported ${safeBranch}-inactive-employees.pdf`);
+    const branch = $('branch').selectedOptions[0]?.textContent || $('branch').value;
+    const safeBranch = String(branch).replace(/[\\/:*?"<>|]/g, '_').trim();
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'pt', format: 'a4' });
+    await registerLoraFont(pdf);
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    pdf.setFont('Lora', 'bold');
+    pdf.setFontSize(16);
+    pdf.setTextColor(0, 0, 0);
+    pdf.text(`Inactive Employees - ${branch}`, pageWidth / 2, 34, { align: 'center' });
+    pdf.autoTable({
+      startY: 52,
+      margin: { left: 32, right: 32 },
+      head: [['EMPLOYEE CODE', 'EMPLOYEE NAME']],
+      body,
+      showHead: 'everyPage',
+      styles: { font: 'Lora', fontSize: 10, cellPadding: 6, halign: 'center', textColor: [0, 0, 0] },
+      headStyles: { fillColor: [217, 217, 217], textColor: [0, 0, 0], font: 'Lora', fontStyle: 'bold', halign: 'center' }
+    });
+    pdf.save(`${safeBranch}-inactive-employees.pdf`);
+    setMsg(`Exported ${safeBranch}-inactive-employees.pdf`);
+  } catch (e) {
+    setMsg('PDF export failed: ' + (e.message || e), true);
+    console.error(e);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function loadInactive() {
