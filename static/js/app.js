@@ -143,13 +143,13 @@ function fixOut(inM, outM, raw) {
 }
 
 function analyse(r) {
-  if (!r) return { inM: null, outM: null, work: 0, st: 'A' };
+  if (!r) return { inM: null, outM: null, work: 0, st: 'A', noOut: false };
   const inM = toMin(r.inT), outM = fixOut(inM, toMin(r.outT), r.outT);
   const work = inM != null && outM != null && outM > inM
     ? outM - inM
     : (inM != null && outM == null ? (durationMinutes(r.dur) || 0) : 0);
   const st = outM == null || (inM != null && inM > ABSENT_AFTER) ? 'A' : status(work);   // no punch-out -> A
-  return { inM, outM, work, st };
+  return { inM, outM, work, st, noOut: inM != null && outM == null };   // noOut: punched in, never punched out
 }
 
 function employeeIdentity(row) {
@@ -160,6 +160,10 @@ function employeeIdentity(row) {
 }
 
 const pill = s => `<span class="pill ${s}">${s}</span>`;
+// Daily-report status cell: punched in but no punch-out -> red NO OUT PUNCH (still counted as A)
+const statusPill = a => a.noOut
+  ? '<span class="pill A" style="background:#FEE2E2;color:#B91C1C;font-weight:700;white-space:nowrap">NO OUT PUNCH</span>'
+  : pill(a.st);
 
 // ---------- API ----------
 // Responses are cached with NO expiry. They are dropped only when the server reports a new
@@ -388,7 +392,7 @@ function renderDaily() {
       <td>${out}</td>
       <td class="early">${early}</td>
       <td>${fmtHM(a.work)}</td>
-      <td>${pill(a.st)}</td></tr>`;
+      <td>${statusPill(a)}</td></tr>`;
   }).join('') || `<tr><td colspan="8" class="empty">No data</td></tr>`;
 
   $('cards').innerHTML = [['P', 'Present'], ['H', 'Half-day'], ['A', 'Absent']].map(([k, l]) =>
@@ -1025,7 +1029,7 @@ function dailyRowsFor(data, date) {
       a.inM != null && a.inM > LATE_AFTER ? fmtHM(a.inM - LATE_AFTER) : '',
       a.outM != null ? fmt12(a.outM) : (a.inM != null ? 'No out punch' : ''),
       a.outM != null && a.outM < EARLY_BEFORE ? fmtHM(EARLY_BEFORE - a.outM) : '',
-      fmtHM(a.work), a.st
+      fmtHM(a.work), a.noOut ? 'NO OUT PUNCH' : a.st
     ];
   });
   return { body, cnt };
@@ -1081,7 +1085,7 @@ async function makePdf(branch, data, date) {
       if (h.column.index === 1) h.cell.styles.halign = 'left';
       if (h.column.index === 3 || h.column.index === 5) h.cell.styles.textColor = [220, 38, 38];
       if (h.column.index === 7) {
-        const [bg, fg] = colors[h.cell.raw] || colors.A;
+        const [bg, fg] = h.cell.raw === 'NO OUT PUNCH' ? [[254, 226, 226], [185, 28, 28]] : (colors[h.cell.raw] || colors.A);
         h.cell.styles.fillColor = bg; h.cell.styles.textColor = fg;
         h.cell.styles.fontStyle = 'bold'; h.cell.styles.halign = 'center';
       }

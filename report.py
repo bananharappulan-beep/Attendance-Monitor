@@ -4,7 +4,8 @@ Same columns and rules as the Daily Report on screen:
   LATE TIME       = punch in  - 09:10  (only when after 09:10)
   EARLY LEAVING   = 17:00     - punch out (only when before 17:00)
   WORKING HOURS   = punch out - punch in
-    STATUS          = P (> 5h) / H (4h to 5h inclusive) / A (< 4h, no record, no punch-out, or punch-in after 14:00)
+    STATUS          = P (> 5h) / H (4h to 5h inclusive) / A (< 4h, no record, or punch-in after 14:00)
+                      NO OUT PUNCH (red) = punched in, no punch-out (counted as A)
 """
 import io
 import re
@@ -28,7 +29,8 @@ HEAD = ["SL NO", "EMP NAME", "PUNCH IN TIME", "LATE TIME", "PUNCH OUT",
 SUMMARY_HEAD = ["BRANCH", "EMPLOYEES", "PRESENT", "HALF-DAY", "ABSENT", "TOTAL WORKING HOURS"]
 
 # status colours (same as the web page): (background, text)
-FILL = {"P": ("DCFCE7", "166534"), "H": ("FEF3C7", "92400E"), "A": ("FEE2E2", "991B1B")}
+FILL = {"P": ("DCFCE7", "166534"), "H": ("FEF3C7", "92400E"), "A": ("FEE2E2", "991B1B"),
+        "NO OUT PUNCH": ("FEE2E2", "B91C1C")}
 
 
 def _hm(m):
@@ -57,7 +59,8 @@ def branch_report(rows, iso):
             late = _hm(in_m - LATE_AFTER) if in_m is not None and in_m > LATE_AFTER else ""
             early = _hm(EARLY_BEFORE - out_m) if out_m is not None and out_m < EARLY_BEFORE else ""
             out_txt = _hm(out_m) if out_m is not None else ("No out punch" if in_m is not None else "")
-            out.append([i, n, _hm(in_m), late, out_txt, early, _hm(work), st])
+            shown = "NO OUT PUNCH" if in_m is not None and out_m is None else st   # counted as A
+            out.append([i, n, _hm(in_m), late, out_txt, early, _hm(work), shown])
     work_total = sum(S.work_minutes(by_key.get((iso, name))) for name in names)
     return {"has_data": has_data, "total": len(names), "work_total": work_total,
             "counts": counts, "rows": out}
@@ -141,7 +144,7 @@ def build_xlsx(iso):
     ws.freeze_panes = "A4"
 
     # ---- one sheet per branch ----
-    widths = (8, 30, 16, 12, 16, 20, 22, 10)
+    widths = (8, 30, 16, 12, 16, 20, 22, 18)
     for b, rep in reports:
         ws = wb.create_sheet(_safe_sheet_title(b, used))
         ws["A1"] = f"{b} - {_dmy(iso)}"
@@ -222,7 +225,7 @@ def build_pdf(iso):
     # ---- one section per branch ----
     heads = ["SL NO", "EMP NAME", "PUNCH IN\nTIME", "LATE\nTIME", "PUNCH\nOUT",
              "EARLY LEAVING\nTIME", "TOTAL WORKING\nHOURS", "STATUS"]
-    widths = [28, 140, 58, 42, 62, 72, 78, 40]
+    widths = [28, 118, 58, 42, 62, 72, 78, 62]
     for b, rep in reports:
         story += [PageBreak(), Paragraph(escape(b), h2),
                   Paragraph(f"Date: {_dmy(iso)}", styles["Normal"]), Spacer(1, 6)]
