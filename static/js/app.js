@@ -162,7 +162,7 @@ function employeeIdentity(row) {
 const pill = s => `<span class="pill ${s}">${s}</span>`;
 // Daily-report status cell: punched in but no punch-out -> red NO OUT PUNCH (still counted as A)
 const statusPill = a => a.noOut
-  ? '<span class="pill A" style="background:#FEE2E2;color:#B91C1C;font-weight:700;white-space:nowrap">NO OUT PUNCH</span>'
+  ? '<span class="pill A" style="display:inline-block;width:auto;min-width:0;max-width:none;height:auto;padding:3px 10px;border-radius:6px;background:#FEE2E2;color:#B91C1C;font-weight:700;white-space:nowrap;line-height:1.3">NO OUT PUNCH</span>'
   : pill(a.st);
 
 // ---------- API ----------
