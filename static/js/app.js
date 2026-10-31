@@ -148,7 +148,7 @@ function analyse(r) {
   const work = inM != null && outM != null && outM > inM
     ? outM - inM
     : (inM != null && outM == null ? (durationMinutes(r.dur) || 0) : 0);
-  const st = inM != null && inM > ABSENT_AFTER ? 'A' : status(work);
+  const st = outM == null || (inM != null && inM > ABSENT_AFTER) ? 'A' : status(work);   // no punch-out -> A
   return { inM, outM, work, st };
 }
 
@@ -368,7 +368,7 @@ function setMsg(text, isError = false) {
 function renderDaily() {
   const d = $('date').value;
   const heads = ['SL NO', 'EMP NAME', 'PUNCH IN TIME', 'LATE TIME', 'PUNCH OUT',
-                 'EARLY LEAVING TIME', 'TOTAL WORKING HOURS', 'STATUS'];
+    'EARLY LEAVING TIME', 'TOTAL WORKING HOURS', 'STATUS'];
   $('dailyHead').innerHTML = heads.map(h => `<th>${h}</th>`).join('');
 
   const cnt = { P: 0, H: 0, A: 0 };
@@ -509,7 +509,7 @@ async function loadBranch() {
     setMsg(attendanceMatrixError
       ? `Inactive status unavailable: ${attendanceMatrixError.message || attendanceMatrixError}`
       : `${rows.length} records · ${names.length} employees · updated ${new Date().toLocaleTimeString()}`,
-    Boolean(attendanceMatrixError));
+      Boolean(attendanceMatrixError));
   } catch (e) { setMsg('Error: ' + (e.message || e), true); }
 }
 
@@ -1176,8 +1176,8 @@ function applyStatusColorsForPdfCell(cell, theme = '') {
   const value = String(cell.cell.raw ?? cell.cell.text ?? '').trim().toUpperCase();
   const status = value === 'P' ? { bg: [220, 252, 231], fg: [22, 101, 52] }
     : value === 'H' ? { bg: [254, 243, 199], fg: [146, 64, 14] }
-    : value === 'A' ? { bg: [254, 226, 226], fg: [153, 27, 27] }
-    : null;
+      : value === 'A' ? { bg: [254, 226, 226], fg: [153, 27, 27] }
+        : null;
 
   if (status) {
     cell.cell.styles.fillColor = status.bg;

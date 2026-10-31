@@ -4,7 +4,7 @@ Same columns and rules as the Daily Report on screen:
   LATE TIME       = punch in  - 09:10  (only when after 09:10)
   EARLY LEAVING   = 17:00     - punch out (only when before 17:00)
   WORKING HOURS   = punch out - punch in
-    STATUS          = P (> 5h) / H (4h to 5h inclusive) / A (< 4h, no record, or punch-in after 14:00)
+    STATUS          = P (> 5h) / H (4h to 5h inclusive) / A (< 4h, no record, no punch-out, or punch-in after 14:00)
 """
 import io
 import re

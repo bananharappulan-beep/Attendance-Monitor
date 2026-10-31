@@ -109,8 +109,10 @@ def work_minutes(row):
 
 
 def status_for(row):
-    """P / H / A from punch times or, without punch-out, the stored duration."""
+    """P / H / A from punch times. No punch-out (or no record) -> A."""
     in_minutes = _minutes(row.get("inT", "")) if row else None
+    if not row or not _minutes(row.get("outT", "")):
+        return "A"            # no punch-out -> A
     if in_minutes is not None and in_minutes > ABSENT_AFTER:
         return "A"
     work = work_minutes(row)
