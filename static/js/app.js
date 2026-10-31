@@ -162,7 +162,7 @@ function employeeIdentity(row) {
 const pill = s => `<span class="pill ${s}">${s}</span>`;
 // Daily-report status cell: punched in but no punch-out -> red NO OUT PUNCH (still counted as A)
 const statusPill = a => a.noOut
-  ? '<span class="pill A" style="display:inline-block;width:auto;min-width:0;max-width:none;height:auto;padding:3px 10px;border-radius:6px;background:#FEE2E2;color:#B91C1C;font-weight:700;white-space:nowrap;line-height:1.3">NO OUT PUNCH</span>'
+  ? '<span class="pill A" style="display:inline-block;width:auto;min-width:0;max-width:none;height:auto;padding:3px 10px;border-radius:6px;background:#DC2626;color:#fff;font-weight:700;white-space:nowrap;line-height:1.3">NO OUT PUNCH</span>'
   : pill(a.st);
 
 // ---------- API ----------
@@ -1085,7 +1085,7 @@ async function makePdf(branch, data, date) {
       if (h.column.index === 1) h.cell.styles.halign = 'left';
       if (h.column.index === 3 || h.column.index === 5) h.cell.styles.textColor = [220, 38, 38];
       if (h.column.index === 7) {
-        const [bg, fg] = h.cell.raw === 'NO OUT PUNCH' ? [[254, 226, 226], [185, 28, 28]] : (colors[h.cell.raw] || colors.A);
+        const [bg, fg] = h.cell.raw === 'NO OUT PUNCH' ? [[220, 38, 38], [255, 255, 255]] : (colors[h.cell.raw] || colors.A);
         h.cell.styles.fillColor = bg; h.cell.styles.textColor = fg;
         h.cell.styles.fontStyle = 'bold'; h.cell.styles.halign = 'center';
       }

@@ -30,7 +30,7 @@ SUMMARY_HEAD = ["BRANCH", "EMPLOYEES", "PRESENT", "HALF-DAY", "ABSENT", "TOTAL W
 
 # status colours (same as the web page): (background, text)
 FILL = {"P": ("DCFCE7", "166534"), "H": ("FEF3C7", "92400E"), "A": ("FEE2E2", "991B1B"),
-        "NO OUT PUNCH": ("FEE2E2", "B91C1C")}
+        "NO OUT PUNCH": ("DC2626", "FFFFFF")}
 
 
 def _hm(m):
