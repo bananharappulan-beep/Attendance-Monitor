@@ -53,7 +53,10 @@ window.addEventListener('load', async () => {
     businessSelect.disabled = true;
   }
   document.querySelectorAll('.tab[data-tab]').forEach(button =>
-    button.classList.toggle('hidden', !permissions.tabs.includes(['presence', 'monthly', 'punchout', 'dashboard'].includes(button.dataset.tab) ? 'punchin' : button.dataset.tab))
+    button.classList.toggle('hidden', !permissions.tabs.includes(
+      button.dataset.tab === 'employee-wise' ? 'daily'
+        : ['presence', 'monthly', 'punchout', 'dashboard'].includes(button.dataset.tab) ? 'punchin' : button.dataset.tab
+    ))
   );
   // hide the whole Reports group when none of its reports is allowed
   $('reportsGroup')?.classList.toggle('hidden', !document.querySelector('#reportsOptions .tab[data-tab]:not(.hidden)'));
@@ -400,6 +403,173 @@ function renderDaily() {
   filterVisibleRows();
 }
 
+const employeeRangeMonths = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+const employeeWeekdays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+let employeeRange = { start: '', end: '' };
+let employeeRangeDraft = null;
+let employeeCalendarMonth = '';
+
+function localDateIso(date) {
+  return `${date.getFullYear()}-${p2(date.getMonth() + 1)}-${p2(date.getDate())}`;
+}
+
+function rangeDateLabel(start, end) {
+  if (!start || !end) return 'Pick a start and end date';
+  return start === end ? dmy(start) : `${dmy(start)} – ${dmy(end)}`;
+}
+
+function renderEmployeeRangeCalendar() {
+  const container = $('employeeRangeCalendar');
+  if (!container) return;
+  const base = employeeCalendarMonth || employeeRange.start || $('date').value || localDateIso(new Date());
+  const [year, month] = base.split('-').map(Number);
+  const firstMonth = new Date(year, month - 1, 1);
+  const start = employeeRangeDraft?.start || '';
+  const end = employeeRangeDraft?.end || '';
+  const months = [0, 1].map(offset => {
+    const current = new Date(firstMonth.getFullYear(), firstMonth.getMonth() + offset, 1);
+    const days = new Date(current.getFullYear(), current.getMonth() + 1, 0).getDate();
+    const leading = current.getDay();
+    const cellCount = Math.ceil((leading + days) / 7) * 7;
+    const cells = Array.from({ length: cellCount }, (_, index) => {
+      const day = new Date(current.getFullYear(), current.getMonth(), index - leading + 1);
+      const iso = localDateIso(day);
+      const selected = iso === start || iso === end;
+      const inRange = start && end && iso > start && iso < end;
+      return `<button type="button" class="employee-range-day${day.getMonth() !== current.getMonth() ? ' outside' : ''}${selected ? ' selected' : ''}${inRange ? ' in-range' : ''}"
+        data-range-day="${iso}" aria-label="${dmy(iso)}"${selected ? ' aria-pressed="true"' : ' aria-pressed="false"'}>${day.getDate()}</button>`;
+    }).join('');
+    return `<section class="employee-range-month">
+      <h3>${employeeRangeMonths[current.getMonth()]} ${current.getFullYear()}</h3>
+      <div class="employee-range-weekdays">${employeeWeekdays.map(day => `<span>${day}</span>`).join('')}</div>
+      <div class="employee-range-days">${cells}</div>
+    </section>`;
+  }).join('');
+  container.innerHTML = months;
+  $('employeeRangeSelection').textContent = rangeDateLabel(start, end);
+  $('employeeRangeApply').disabled = !start || !end || dateLocked;
+  $('employeeRangePrev').disabled = dateLocked;
+  $('employeeRangeNext').disabled = dateLocked;
+}
+
+function updateEmployeeRangeButton() {
+  const button = $('employeeRangeButton');
+  if (!button) return;
+  button.disabled = dateLocked;
+  $('employeeRangeLabel').textContent = rangeDateLabel(employeeRange.start, employeeRange.end);
+}
+
+function setEmployeeRangePreset(preset) {
+  const today = new Date();
+  const todayIso = localDateIso(today);
+  let start, end = todayIso;
+  if (preset === 'all') {
+    const dates = rows.map(row => row.d).filter(Boolean).sort();
+    start = dates[0] || todayIso;
+    end = dates[dates.length - 1] || todayIso;
+  } else if (preset === 'yesterday') {
+    const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+    start = end = localDateIso(yesterday);
+  } else if (preset === 'last7' || preset === 'last30') {
+    const days = preset === 'last7' ? 7 : 30;
+    start = localDateIso(new Date(today.getFullYear(), today.getMonth(), today.getDate() - days + 1));
+  } else if (preset === 'thisMonth') {
+    start = localDateIso(new Date(today.getFullYear(), today.getMonth(), 1));
+  } else if (preset === 'lastMonth') {
+    start = localDateIso(new Date(today.getFullYear(), today.getMonth() - 1, 1));
+    end = localDateIso(new Date(today.getFullYear(), today.getMonth(), 0));
+  } else if (preset === 'today') {
+    start = todayIso;
+  } else {
+    employeeRangeDraft = { start: '', end: '' };
+    document.querySelectorAll('[data-range-preset]').forEach(button =>
+      button.classList.toggle('active', button.dataset.rangePreset === preset)
+    );
+    renderEmployeeRangeCalendar();
+    return;
+  }
+  employeeRangeDraft = { start, end };
+  employeeCalendarMonth = `${start.slice(0, 7)}-01`;
+  document.querySelectorAll('[data-range-preset]').forEach(button =>
+    button.classList.toggle('active', button.dataset.rangePreset === preset)
+  );
+  renderEmployeeRangeCalendar();
+}
+
+function renderEmployeeWise() {
+  const selectedDate = $('date').value;
+  if (dateLocked) employeeRange = { start: selectedDate, end: selectedDate };
+  else if (!employeeRange.start && selectedDate) employeeRange = { start: selectedDate, end: selectedDate };
+  updateEmployeeRangeButton();
+
+  const { start, end } = employeeRange;
+  const dateCount = start && end && start <= end
+    ? Math.round((new Date(`${end}T00:00:00`) - new Date(`${start}T00:00:00`)) / 86400000) + 1
+    : 0;
+  const reportRows = [];
+  if (dateCount > 0) {
+    for (let offset = 0; offset < dateCount; offset++) {
+      const current = new Date(`${start}T00:00:00`);
+      current.setDate(current.getDate() + offset);
+      const date = localDateIso(current);
+      names.forEach(employee => reportRows.push({ date, employee }));
+    }
+  }
+  $('employeeWiseHint').textContent = start && end
+    ? `${rangeDateLabel(start, end)} · ${reportRows.length} employee-day${reportRows.length === 1 ? '' : 's'}`
+    : 'Select a date range to view attendance.';
+  $('employeeWiseBody').innerHTML = reportRows.map(({ date, employee }) => {
+    const attendance = analyse(byKey.get(date + '|' + employee.key));
+    const afterTwoPm = attendance.inM != null && attendance.inM > ABSENT_AFTER;
+    return `<tr class="${afterTwoPm ? 'after-2pm' : ''}">
+      <td>${dmy(date)}</td>
+      <td class="name">${esc(employee.name)}</td>
+      <td>${fmt12(attendance.inM)}</td>
+      <td>${fmt12(attendance.outM)}</td>
+      <td>${pill(attendance.st)}</td></tr>`;
+  }).join('') || '<tr><td colspan="5" class="empty">No attendance for this range.</td></tr>';
+  filterVisibleRows();
+}
+
+function openEmployeeRangePicker() {
+  if (dateLocked) return;
+  employeeRangeDraft = { ...employeeRange };
+  employeeCalendarMonth = `${employeeRange.start || $('date').value || localDateIso(new Date())}`.slice(0, 7) + '-01';
+  document.querySelectorAll('[data-range-preset]').forEach(button => button.classList.remove('active'));
+  $('employeeRangePicker').hidden = false;
+  $('employeeRangeButton').setAttribute('aria-expanded', 'true');
+  renderEmployeeRangeCalendar();
+}
+
+function closeEmployeeRangePicker() {
+  $('employeeRangePicker').hidden = true;
+  $('employeeRangeButton').setAttribute('aria-expanded', 'false');
+  $('employeeRangeButton').focus();
+}
+
+function chooseEmployeeRangeDay(date) {
+  const draft = employeeRangeDraft || { start: '', end: '' };
+  if (!draft.start || draft.end) {
+    employeeRangeDraft = { start: date, end: '' };
+  } else {
+    employeeRangeDraft = date < draft.start
+      ? { start: date, end: draft.start }
+      : { start: draft.start, end: date };
+  }
+  document.querySelectorAll('[data-range-preset]').forEach(button =>
+    button.classList.toggle('active', button.dataset.rangePreset === 'custom')
+  );
+  renderEmployeeRangeCalendar();
+}
+
+function applyEmployeeRange() {
+  if (!employeeRangeDraft?.start || !employeeRangeDraft?.end || dateLocked) return;
+  employeeRange = { ...employeeRangeDraft };
+  closeEmployeeRangePicker();
+  renderEmployeeWise();
+}
+
 // ---------- Matrix ----------
 function renderMatrix() {
   const f = $('from').value, t = $('to').value;
@@ -426,12 +596,12 @@ function renderMatrix() {
 
 function filterVisibleRows() {
   const query = $('employeeSearch')?.value.trim().toLocaleLowerCase() || '';
-  const activeView = ['daily', 'matrix', 'inactive', 'summary']
+  const activeView = ['daily', 'employee-wise', 'matrix', 'inactive', 'summary']
     .find(id => !$(`${id}`).classList.contains('hidden'));
   if (!activeView || activeView === 'summary') return;
   const table = document.querySelector(`#${activeView} table`);
   if (!table) return;
-  const columns = { daily: [1], matrix: [0, 1], inactive: [0, 1], summary: [1] }[activeView];
+  const columns = { daily: [1], 'employee-wise': [1], matrix: [0, 1], inactive: [0, 1], summary: [1] }[activeView];
   table.querySelectorAll('tbody tr').forEach(row => {
     if (row.querySelector('.empty')) {
       row.classList.remove('hidden');
@@ -509,6 +679,7 @@ async function loadBranch() {
       $('date').value = defaultDate(rows.map(r => r.d));
     setMonthRange();
     renderDaily();
+    renderEmployeeWise();
     if (!$('matrix').classList.contains('hidden')) await loadMatrix(sourceBranch);
     setMsg(attendanceMatrixError
       ? `Inactive status unavailable: ${attendanceMatrixError.message || attendanceMatrixError}`
@@ -526,7 +697,11 @@ function appendSyncLog(message) {
 const SYNC_BUTTON = { archive: 'syncArchive', fetch: 'syncFetchData', settings: 'syncFetchDays' };
 
 function showDeveloperSyncPanel(action) {
-  ['dashboard', 'daily', 'matrix', 'inactive', 'summary', 'punchin', 'punchout', 'presence', 'monthly'].forEach(id => $(id)?.classList.add('hidden'));
+  ['dashboard', 'daily', 'employee-wise', 'matrix', 'inactive', 'summary', 'punchin', 'punchout', 'presence', 'monthly'].forEach(id => $(id)?.classList.add('hidden'));
+  $('dateFilter').classList.remove('hidden');
+  $('employeeRangeControl').classList.add('hidden');
+  $('employeeRangePicker').hidden = true;
+  $('employeeRangeButton').setAttribute('aria-expanded', 'false');
   $('syncPanel').classList.remove('hidden');
   $('employeeSearchRow').classList.add('hidden');
   document.querySelectorAll('.tab[data-tab]').forEach(button => button.classList.remove('active'));
@@ -695,7 +870,11 @@ $('reportsToggle')?.addEventListener('click', () =>
 function showTab(tab) {
   $('syncPanel').classList.add('hidden');
   document.querySelectorAll('.sync-action').forEach(button => button.classList.remove('active'));
-  ['dashboard', 'daily', 'matrix', 'inactive', 'summary', 'punchin', 'punchout', 'presence', 'monthly'].forEach(id => $(id)?.classList.toggle('hidden', id !== tab));
+  ['dashboard', 'daily', 'employee-wise', 'matrix', 'inactive', 'summary', 'punchin', 'punchout', 'presence', 'monthly'].forEach(id => $(id)?.classList.toggle('hidden', id !== tab));
+  $('dateFilter').classList.toggle('hidden', tab === 'employee-wise');
+  $('employeeRangeControl').classList.toggle('hidden', tab !== 'employee-wise');
+  $('employeeRangePicker').hidden = true;
+  $('employeeRangeButton').setAttribute('aria-expanded', 'false');
   $('employeeSearchRow').classList.toggle('hidden', ['dashboard', 'summary', 'punchin', 'punchout', 'presence'].includes(tab));
   document.querySelector('.status-search-row')?.classList.toggle('hidden', tab === 'dashboard');   // no status line on the dashboard
   document.querySelectorAll('.tab[data-tab]').forEach(button =>
@@ -719,6 +898,40 @@ const bind = (id, event, handler) => {
   const element = $(id);
   if (element) element[event] = handler;
 };
+bind('employeeRangeButton', 'onclick', () => {
+  if ($('employeeRangePicker').hidden) openEmployeeRangePicker();
+  else closeEmployeeRangePicker();
+});
+bind('employeeRangeCalendar', 'onclick', event => {
+  const day = event.target.closest('[data-range-day]');
+  if (day) chooseEmployeeRangeDay(day.dataset.rangeDay);
+});
+bind('employeeRangePrev', 'onclick', () => {
+  const [year, month] = employeeCalendarMonth.split('-').map(Number);
+  employeeCalendarMonth = localDateIso(new Date(year, month - 2, 1));
+  renderEmployeeRangeCalendar();
+});
+bind('employeeRangeNext', 'onclick', () => {
+  const [year, month] = employeeCalendarMonth.split('-').map(Number);
+  employeeCalendarMonth = localDateIso(new Date(year, month, 1));
+  renderEmployeeRangeCalendar();
+});
+document.querySelectorAll('[data-range-preset]').forEach(button =>
+  button.addEventListener('click', () => setEmployeeRangePreset(button.dataset.rangePreset))
+);
+bind('employeeRangeCancel', 'onclick', closeEmployeeRangePicker);
+bind('employeeRangeApply', 'onclick', applyEmployeeRange);
+document.addEventListener('pointerdown', event => {
+  const picker = $('employeeRangePicker');
+  if (picker && !picker.hidden && !picker.contains(event.target) && !$('employeeRangeButton').contains(event.target)) {
+    picker.hidden = true;
+    $('employeeRangeButton').setAttribute('aria-expanded', 'false');
+  }
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && $('employeeRangePicker') && !$('employeeRangePicker').hidden)
+    closeEmployeeRangePicker();
+});
 bind('branch', 'onchange', () => {
   $('date').value = '';
   refreshActiveView();
@@ -735,6 +948,7 @@ bind('businessName', 'onchange', () => {
 bind('date', 'onchange', () => {
   setMonthRange();
   renderDaily();
+  renderEmployeeWise();
   renderMatrix();
   if (!$('summary').classList.contains('hidden')) loadSummary();
   if (window.dashboardOpen?.()) loadDashboard();
@@ -756,7 +970,7 @@ bind('refresh', 'onclick', () => refreshActiveView());    // reload whatever vie
 async function refreshActiveView() {
   if (!$('branch').value) return;
   clearApiCache();
-  const activeTab = ['dashboard', 'daily', 'matrix', 'inactive', 'summary', 'punchin', 'punchout', 'presence', 'monthly']
+  const activeTab = ['dashboard', 'daily', 'employee-wise', 'matrix', 'inactive', 'summary', 'punchin', 'punchout', 'presence', 'monthly']
     .find(id => !$(`${id}`).classList.contains('hidden'));
   if (activeTab === 'dashboard') {
     await loadDashboard();
