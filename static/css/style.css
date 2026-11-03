@@ -258,15 +258,15 @@ select { min-width: 180px; }
 .matrix-table th.matrix-total-nop { color: var(--red-fg); }
 .matrix-table th.matrix-total-h { color: var(--amber-fg); }
 .matrix-table th.name-corner,
-.matrix-table td.emp { width: 12rem; min-width: 12rem; max-width: 12rem; }
+.matrix-table td.emp { width: 18rem; min-width: 18rem; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; }
 .matrix-table th.matrix-total-p,
-.matrix-table td.matrix-total-p { position: sticky; left: 20rem; z-index: 4; width: 3.25rem; min-width: 3.25rem; max-width: 3.25rem; background: var(--surface); }
+.matrix-table td.matrix-total-p { position: sticky; left: 26rem; z-index: 4; width: 3.25rem; min-width: 3.25rem; max-width: 3.25rem; background: var(--surface); }
 .matrix-table th.matrix-total-a,
-.matrix-table td.matrix-total-a { position: sticky; left: 23.25rem; z-index: 4; width: 3rem; min-width: 3rem; max-width: 3rem; background: var(--surface); }
+.matrix-table td.matrix-total-a { position: sticky; left: 29.25rem; z-index: 4; width: 3rem; min-width: 3rem; max-width: 3rem; background: var(--surface); }
 .matrix-table th.matrix-total-h,
-.matrix-table td.matrix-total-h { position: sticky; left: 26.25rem; z-index: 4; width: 3rem; min-width: 3rem; max-width: 3rem; background: var(--surface); }
+.matrix-table td.matrix-total-h { position: sticky; left: 32.25rem; z-index: 4; width: 3rem; min-width: 3rem; max-width: 3rem; background: var(--surface); }
 .matrix-table th.matrix-total-nop,
-.matrix-table td.matrix-total-nop { position: sticky; left: 29.25rem; z-index: 4; width: 3.75rem; min-width: 3.75rem; max-width: 3.75rem; background: var(--surface); }
+.matrix-table td.matrix-total-nop { position: sticky; left: 35.25rem; z-index: 4; width: 3.75rem; min-width: 3.75rem; max-width: 3.75rem; background: var(--surface); }
 .matrix-table thead th.matrix-total-p,
 .matrix-table thead th.matrix-total-a,
 .matrix-table thead th.matrix-total-h,
