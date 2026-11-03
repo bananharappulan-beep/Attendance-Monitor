@@ -253,18 +253,53 @@ select { min-width: 180px; }
 .matrix-wrap { overflow: auto; max-height: 70vh; }
 .matrix-table { border-collapse: collapse; font-size: .75rem; }
 .matrix-table th { position: sticky; top: 0; z-index: 10; background: var(--head); padding: .5rem; white-space: nowrap; }
-.matrix-table th.corner { left: 0; z-index: 20; text-align: center; padding: .5rem .75rem; }
-.matrix-table th.name-corner { position: sticky; left: 8rem; z-index: 20; text-align: center; padding: .5rem .75rem; }
+.matrix-table th.matrix-total-p { color: var(--green-fg); }
+.matrix-table th.matrix-total-a,
+.matrix-table th.matrix-total-nop { color: var(--red-fg); }
+.matrix-table th.matrix-total-h { color: var(--amber-fg); }
+.matrix-table th.name-corner,
+.matrix-table td.emp { width: 12rem; min-width: 12rem; max-width: 12rem; }
+.matrix-table th.matrix-total-p,
+.matrix-table td.matrix-total-p { position: sticky; left: 20rem; z-index: 4; width: 3.25rem; min-width: 3.25rem; max-width: 3.25rem; background: var(--surface); }
+.matrix-table th.matrix-total-a,
+.matrix-table td.matrix-total-a { position: sticky; left: 23.25rem; z-index: 4; width: 3rem; min-width: 3rem; max-width: 3rem; background: var(--surface); }
+.matrix-table th.matrix-total-h,
+.matrix-table td.matrix-total-h { position: sticky; left: 26.25rem; z-index: 4; width: 3rem; min-width: 3rem; max-width: 3rem; background: var(--surface); }
+.matrix-table th.matrix-total-nop,
+.matrix-table td.matrix-total-nop { position: sticky; left: 29.25rem; z-index: 4; width: 3.75rem; min-width: 3.75rem; max-width: 3.75rem; background: var(--surface); }
+.matrix-table thead th.matrix-total-p,
+.matrix-table thead th.matrix-total-a,
+.matrix-table thead th.matrix-total-h,
+.matrix-table thead th.matrix-total-nop { z-index: 20; background: var(--head); }
+.matrix-table th.matrix-total-p,
+.matrix-table td.matrix-total-p,
+.matrix-table th.matrix-total-a,
+.matrix-table td.matrix-total-a,
+.matrix-table th.matrix-total-h,
+.matrix-table td.matrix-total-h,
+.matrix-table th.matrix-total-nop,
+.matrix-table td.matrix-total-nop { border-right: 1px solid var(--border); }
+.matrix-table th.matrix-total-nop,
+.matrix-table td.matrix-total-nop { border-right: 2px solid var(--gold); }
+.matrix-table th.sunday { background: var(--red-bg); color: var(--red-fg); }
+.matrix-table th.corner { left: 0; z-index: 30; text-align: center; padding: .5rem .75rem; }
+.matrix-table th.name-corner { position: sticky; left: 8rem; z-index: 30; text-align: center; padding: .5rem .75rem; background: var(--head); }
 .matrix-table td { padding: .25rem; text-align: center; }
+.matrix-table td.matrix-total-p { color: var(--green-fg); font-weight: 700; }
+.matrix-table td.matrix-total-a,
+.matrix-table td.matrix-total-nop { color: var(--red-fg); font-weight: 700; }
+.matrix-table td.matrix-total-h { color: var(--amber-fg); font-weight: 700; }
+.matrix-table td.sunday { background: var(--red-bg); }
 .matrix-table tbody tr { border-top: 1px solid var(--border); }
-.matrix-table td.emp-code { position: sticky; left: 0; z-index: 2; width: 8rem; min-width: 8rem; max-width: 8rem; overflow: hidden; background: var(--surface); text-align: center; padding: .25rem .5rem; white-space: nowrap; text-overflow: ellipsis; }
-.matrix-table td.emp { position: sticky; left: 8rem; z-index: 1; background: var(--surface); text-align: left; padding: .25rem .75rem; font-weight: 500; white-space: nowrap; }
+.matrix-table td.emp-code { position: sticky; left: 0; z-index: 6; width: 8rem; min-width: 8rem; max-width: 8rem; overflow: hidden; background: var(--surface); text-align: center; padding: .25rem .5rem; white-space: nowrap; text-overflow: ellipsis; }
+.matrix-table td.emp { position: sticky; left: 8rem; z-index: 5; background: var(--surface); text-align: left; padding: .25rem .75rem; font-weight: 500; white-space: nowrap; }
 
 /* status pills */
 .pill { display: inline-block; width: 1.75rem; text-align: center; border-radius: .25rem; font-weight: 600; }
 .pill.P { background: var(--green-bg); color: var(--green-fg); }
 .pill.H { background: var(--amber-bg); color: var(--amber-fg); }
 .pill.A { background: var(--red-bg);   color: var(--red-fg); }
+.matrix-table .pill.no-out { width: auto; max-width: none; padding: 0 .25rem; background: var(--red); color: #fff; white-space: nowrap; }
 
 @media (max-width: 600px) {
   .cards { grid-template-columns: 1fr; }

@@ -110,10 +110,10 @@
     const businesses = allBusinesses ? BUSINESS_ORDER : [selectedBusinessType];
 
     const branches = slicerBranchSources(await api('/api/branches'));   // only what the slicers select
-    const [, all] = await Promise.all([
-      loadAttendanceMatrices(branches),
-      Promise.all(branches.map(async branch => ({ branch, data: await api('/api/data', { branch }) })))
-    ]);
+    const all = await Promise.all(
+      branches.map(async branch => ({ branch, data: await api('/api/data', { branch }) }))
+    );
+    if (dateLocked) await loadAttendanceMatrices(branches);
     const date = $('date').value || defaultDate(all.flatMap(x => x.data.map(r => r.d)));
     const scope = allBusinesses
       ? 'ALL BUSINESSES'
@@ -123,7 +123,9 @@
 
     const rowsByBranch = new Map(all.map(({ branch, data }) => {
       const employees = [...new Map(data.map(row => [employeeIdentity(row), row])).values()];
-      const inactiveKeys = inactiveEmployeeKeys(branch, data) || new Set();
+      const inactiveKeys = dateLocked
+        ? inactiveEmployeeKeys(branch, data) || new Set()
+        : inactiveEmployeeKeysFromRows(data);
       const active = employees.filter(employee => !inactiveKeys.has(employeeIdentity(employee)));
       const day = new Map(data.filter(row => row.d === date).map(row => [employeeIdentity(row), row]));
       const row = blank(`b:${branch.toUpperCase()}`, branch);

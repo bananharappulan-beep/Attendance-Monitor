@@ -252,7 +252,7 @@ def create_app():
                     day
                     for row in matrix.get("rows", [])
                     for day, status in row.get("statuses", {}).items()
-                    if status in ("P", "H", "A")
+                    if status in ("P", "H", "A", "NOP", "NO OUT PUNCH")
                 ),
                 default="",
             )

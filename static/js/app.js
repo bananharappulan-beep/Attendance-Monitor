@@ -325,6 +325,23 @@ function inactiveEmployeeKeys(branch, sourceRows = [], nDays = 4) {
   return new Set(normalized.rows.map(employeeIdentity));
 }
 
+function inactiveEmployeeKeysFromRows(sourceRows, nDays = 4) {
+  const dates = [...new Set(sourceRows.map(row => row.d).filter(Boolean))].sort();
+  if (dates.length < nDays) return new Set();
+
+  const latestDates = dates.slice(-nDays);
+  const employees = new Set();
+  const byDay = new Map();
+  sourceRows.forEach(row => {
+    const identity = employeeIdentity(row);
+    employees.add(identity);
+    byDay.set(`${row.d}|${identity}`, row);
+  });
+  return new Set([...employees].filter(identity =>
+    latestDates.every(day => analyse(byDay.get(`${day}|${identity}`)).st === 'A')
+  ));
+}
+
 function indexRows() {
   byKey = new Map();
   const employees = new Map();
@@ -580,15 +597,32 @@ function renderMatrix() {
     days.push(d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()));
 
   const head = `<tr><th class="corner code-corner">EMP CODE</th><th class="name-corner">EMP NAME</th>` +
-    days.map(x => `<th>${dmy(x)}</th>`).join('') + `</tr>`;
+    `<th class="matrix-total-p">P</th><th class="matrix-total-a">A</th>` +
+    `<th class="matrix-total-h">H</th><th class="matrix-total-nop">NOP</th>` +
+    days.map(day => `<th class="${new Date(`${day}T00:00:00`).getDay() === 0 ? 'sunday' : ''}">${dmy(day)}</th>`).join('') + `</tr>`;
 
-  const body = savedMatrix.rows.map(({ code, name, statuses }) => {
+  const visibleRows = savedMatrix.rows.filter(({ statuses }) =>
+    days.some(day => ['P', 'H', 'NOP', 'NO OUT PUNCH'].includes(statuses[day]))
+  );
+  const body = visibleRows.map(({ code, name, statuses }) => {
+    const totals = { P: 0, A: 0, H: 0, NOP: 0 };
+    days.forEach(day => {
+      const value = statuses[day] === 'NO OUT PUNCH' ? 'NOP' : statuses[day];
+      if (value === 'A' && new Date(`${day}T00:00:00`).getDay() === 0) return;
+      if (value in totals) totals[value]++;
+    });
     const cells = days.map(x => {
       const value = statuses[x];
-      return value ? `<td>${pill(value)}</td>` : `<td></td>`;
+      const sundayClass = new Date(`${x}T00:00:00`).getDay() === 0 ? ' class="sunday"' : '';
+      const statusPill = value === 'NOP' || value === 'NO OUT PUNCH'
+        ? '<span class="pill no-out">NOP</span>'
+        : value ? pill(value) : '';
+      return `<td${sundayClass}>${statusPill}</td>`;
     }).join('');
-    return `<tr><td class="emp-code">${esc(code)}</td><td class="emp">${esc(name)}</td>${cells}</tr>`;
-  }).join('');
+    return `<tr><td class="emp-code">${esc(code)}</td><td class="emp">${esc(name)}</td>` +
+      `<td class="matrix-total-p">${totals.P}</td><td class="matrix-total-a">${totals.A}</td>` +
+      `<td class="matrix-total-h">${totals.H}</td><td class="matrix-total-nop">${totals.NOP}</td>${cells}</tr>`;
+  }).join('') || `<tr><td class="empty" colspan="${days.length + 6}">No employees had attendance during this date range.</td></tr>`;
 
   $('matrixTable').innerHTML = `<thead>${head}</thead><tbody>${body}</tbody>`;
   filterVisibleRows();
@@ -1114,8 +1148,20 @@ async function exportSummaryPdf() {
 }
 
 async function loadBranches() {
-  availableBranches = await api('/api/branches');
-  await updateBranchOptions();
+  if ($('businessName').value === 'ALL' && $('locationType').value === 'ALL') {
+    availableBranches = await api('/api/branches');
+    await updateBranchOptions();
+    return;
+  }
+
+  const branchesRequest = api('/api/branches');
+  await updateBranchOptions(false);
+  const initialSource = $('branch').selectedOptions[0]?.dataset.source;
+  const [, branches] = await Promise.all([updateBranchOptions(), branchesRequest]);
+  availableBranches = branches;
+  await updateBranchOptions(false);
+  if ($('branch').selectedOptions[0]?.dataset.source !== initialSource)
+    await updateBranchOptions();
 }
 
 async function updateBranchOptions(loadData = true) {
@@ -1397,7 +1443,7 @@ function applyStatusColorsForPdfCell(cell, theme = '') {
   const value = String(cell.cell.raw ?? cell.cell.text ?? '').trim().toUpperCase();
   const status = value === 'P' ? { bg: [220, 252, 231], fg: [22, 101, 52] }
     : value === 'H' ? { bg: [254, 243, 199], fg: [146, 64, 14] }
-      : value === 'A' ? { bg: [254, 226, 226], fg: [153, 27, 27] }
+      : value === 'A' || value === 'NOP' || value === 'NO OUT PUNCH' ? { bg: [254, 226, 226], fg: [153, 27, 27] }
         : null;
 
   if (status) {
@@ -1615,7 +1661,7 @@ async function exportMatrixPdf() {
       margin: { top: 44, right: 16, bottom: 18, left: 16 },
       showHead: 'everyPage',
       horizontalPageBreak: true,
-      horizontalPageBreakRepeat: [0, 1],
+      horizontalPageBreakRepeat: [0, 1, 2, 3, 4, 5],
       rowPageBreak: 'avoid',
       styles: {
         font: 'Lora',
@@ -1638,7 +1684,7 @@ async function exportMatrixPdf() {
         index,
         index === 0 ? { cellWidth: 55 } :
           index === 1 ? { cellWidth: 90, halign: 'left' } :
-            { cellWidth: 20, halign: 'center' }
+            index < 6 ? { cellWidth: 24, halign: 'center' } : { cellWidth: 20, halign: 'center' }
       ])),
       didParseCell: cell => {
         if (cell.section === 'body') applyStatusColorsForPdfCell(cell);

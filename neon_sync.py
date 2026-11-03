@@ -119,6 +119,15 @@ def status_for(row):
     return "P" if work >= PRESENT_MIN else "H" if HALF_MIN <= work <= HALF_MAX else "A"
 
 
+def matrix_status_for(row):
+    """Return a distinct matrix status for employees who punched in but not out."""
+    in_minutes = _minutes(row.get("inT", "")) if row else None
+    out_minutes = _minutes(row.get("outT", "")) if row else None
+    if in_minutes is not None and out_minutes is None:
+        return "NOP"
+    return status_for(row)
+
+
 # ---------- read the rows from Neon ----------
 def fetch_source():
     """-> {branch: [{d, code, name, inT, outT, dur}, ...]}  read from every Neon branch table.
@@ -181,7 +190,7 @@ def build_matrix(rows, branch=None, all_source=None):
                 )
     for d in src_dates:
         for identity, employee in employees.items():
-            employee["statuses"][d] = status_for(by_key.get((d, identity)))
+            employee["statuses"][d] = matrix_status_for(by_key.get((d, identity)))
 
     months = {(int(d[:4]), int(d[5:7])) for d in src_dates}
     all_dates = [date(y, m, day) for y, m in sorted(months)
@@ -252,8 +261,8 @@ def _parse_saved_matrix(branch, values, source):
         statuses = {}
         for iso_date, index in date_columns:
             value = _cell(row, index).strip().upper()
-            if value in ("P", "H", "A"):
-                statuses[iso_date] = value
+            if value in ("P", "H", "A", "NOP", "NO OUT PUNCH"):
+                statuses[iso_date] = "NOP" if value == "NO OUT PUNCH" else value
         rows.append({"name": name, "code": code, "statuses": statuses})
 
     return {"dates": [d for d, _ in date_columns], "rows": rows}
