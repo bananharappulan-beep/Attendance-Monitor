@@ -527,7 +527,7 @@ function renderEmployeeWise() {
       <td class="name">${esc(employee.name)}</td>
       <td>${fmt12(attendance.inM)}</td>
       <td>${fmt12(attendance.outM)}</td>
-      <td>${pill(attendance.st)}</td></tr>`;
+      <td>${statusPill(attendance)}</td></tr>`;
   }).join('') || '<tr><td colspan="5" class="empty">No attendance for this range.</td></tr>';
   filterVisibleRows();
 }
@@ -616,7 +616,8 @@ function filterVisibleRows() {
     const inactiveKeys = inactiveEmployeeKeys(branch, rows);
     table.querySelectorAll('tbody tr:not(.hidden)').forEach(row => {
       if (inactiveKeys?.has(row.dataset.employeeKey)) return;
-      const status = row.cells[7]?.textContent.trim();
+      let status = row.cells[7]?.textContent.trim();
+      if (status === 'NO OUT PUNCH') status = 'A';   // counted as absent
       if (status in counts) counts[status]++;
     });
     if (!inactiveKeys) counts.A = '—';
@@ -708,7 +709,7 @@ function showDeveloperSyncPanel(action) {
   document.querySelectorAll('.sync-action').forEach(button =>
     button.classList.toggle('active', button.id === SYNC_BUTTON[action])
   );
-  ['exportPdf', 'exportAll', 'exportMatrixPdf', 'exportInactivePdf', 'exportSummaryPdf', 'exportMonthlyPdf']
+  ['exportPdf', 'exportAll', 'exportMatrixPdf', 'exportInactivePdf', 'exportSummaryPdf', 'exportMonthlyPdf', 'exportEmployeeWisePdf']
     .forEach(id => $(id)?.classList.add('hidden'));
   $('syncTitle').textContent = action === 'archive' ? 'Archive Attendance' : 'Fetch Attendance Data';
   $('syncLog').textContent = '';
@@ -887,6 +888,7 @@ function showTab(tab) {
   $('exportInactivePdf').classList.toggle('hidden', tab !== 'inactive');
   $('exportSummaryPdf').classList.toggle('hidden', tab !== 'summary');
   $('exportMonthlyPdf')?.classList.toggle('hidden', tab !== 'monthly');
+  $('exportEmployeeWisePdf')?.classList.toggle('hidden', tab !== 'employee-wise');
   refreshActiveView();
   filterVisibleRows();
 }
@@ -963,6 +965,7 @@ bind('exportAll', 'onclick', exportAllPdf);
 bind('exportMatrixPdf', 'onclick', exportMatrixPdf);
 bind('exportInactivePdf', 'onclick', exportInactivePdf);
 bind('exportSummaryPdf', 'onclick', exportSummaryPdf);
+bind('exportEmployeeWisePdf', 'onclick', exportEmployeeWisePdf);
 bind('fetchDaysSave', 'onclick', () => saveFetchDays(false));
 bind('fetchDaysSaveFetch', 'onclick', () => saveFetchDays(true));
 bind('refresh', 'onclick', () => refreshActiveView());    // reload whatever view is open
@@ -1649,6 +1652,62 @@ async function exportMatrixPdf() {
     });
     pdf.save(`${safeBranch}-status-matrix.pdf`);
     setMsg(`Exported ${safeBranch}-status-matrix.pdf`);
+  } catch (e) {
+    setMsg('PDF export failed: ' + (e.message || e), true);
+    console.error(e);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+// ---------- Employee wise Report: PDF ----------
+async function exportEmployeeWisePdf() {
+  const button = $('exportEmployeeWisePdf');
+  button.disabled = true;
+  try {
+    if (!(await pdfReady())) return;
+    const { start, end } = employeeRange;
+    const body = [...document.querySelectorAll('#employeeWiseBody tr')]
+      .filter(row => !row.classList.contains('hidden') && !row.querySelector('.empty'))
+      .map(row => [...row.cells].map(cell => cell.textContent.trim()));
+    if (!body.length) return setMsg('No employee data to export for this range.', true);
+
+    const branch = $('branch').selectedOptions[0]?.textContent || $('branch').value;
+    const safeBranch = String(branch).replace(/[\\/:*?"<>|]/g, '_').trim();
+    const rangeText = start === end ? dmy(start) : `${dmy(start)} to ${dmy(end)}`;
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'pt', format: 'a4' });
+    await registerLoraFont(pdf);
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    pdf.setFont('Lora', 'bold');
+    pdf.setFontSize(16);
+    pdf.setTextColor(0, 0, 0);
+    pdf.text(`Employee wise Report - ${branch}`, pageWidth / 2, 34, { align: 'center' });
+    pdf.setFont('Lora', 'normal');
+    pdf.setFontSize(10);
+    pdf.setTextColor(100);
+    pdf.text(`${rangeText}   |   Records: ${body.length}`, pageWidth / 2, 52, { align: 'center' });
+    const colors = { P: [[220, 252, 231], [22, 101, 52]], H: [[254, 243, 199], [146, 64, 14]], A: [[254, 226, 226], [153, 27, 27]] };
+    pdf.autoTable({
+      startY: 62,
+      margin: { left: 32, right: 32 },
+      head: [['DATE', 'EMPLOYEE NAME', 'PUNCH IN TIME', 'PUNCH OUT TIME', 'STATUS']],
+      body,
+      showHead: 'everyPage',
+      styles: { font: 'Lora', fontSize: 9, cellPadding: 5, halign: 'center', textColor: [0, 0, 0] },
+      headStyles: { fillColor: [217, 217, 217], textColor: [0, 0, 0], font: 'Lora', fontStyle: 'bold', halign: 'center' },
+      didParseCell: h => {
+        if (h.section !== 'body') return;
+        if (h.column.index === 1) h.cell.styles.halign = 'left';
+        if (h.column.index === 4) {
+          const [bg, fg] = h.cell.raw === 'NO OUT PUNCH' ? [[220, 38, 38], [255, 255, 255]] : (colors[h.cell.raw] || colors.A);
+          h.cell.styles.fillColor = bg; h.cell.styles.textColor = fg; h.cell.styles.fontStyle = 'bold';
+        }
+      }
+    });
+    const file = `${safeBranch}-employee-wise-${start}${end !== start ? '_to_' + end : ''}.pdf`;
+    pdf.save(file);
+    setMsg(`Exported ${file}`);
   } catch (e) {
     setMsg('PDF export failed: ' + (e.message || e), true);
     console.error(e);
